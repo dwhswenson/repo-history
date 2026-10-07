@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "repo-history-tracking"
+version = "0.1.0"
+description = "Normalized monthly GitHub repository activity reports"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = ["jsonschema[format]>=4.18,<5"]
+authors = [{name = "David W.H. Swenson", email = "david.swenson@omsf.io"}]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+repo_history_tracking = ["schemas/*.json", "py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["osx-64"]
+
+[tool.pixi.dependencies]
+python = ">=3.12,<3.13"
+
+[tool.pixi.pypi-dependencies]
+repo-history-tracking = {path = ".", editable = true}
+
+[tool.pixi.feature.dev.dependencies]
+pytest = ">=8"
+pytest-cov = "*"
+ruff = "*"
+python-build = "*"
+pip = "*"
+
+[tool.pixi.feature.dev.tasks]
+test = "pytest"
+coverage = "pytest --cov=repo_history_tracking --cov-report=term-missing"
+lint = "ruff check ."
+format-check = "ruff format --check ."
+format = "ruff format ."
+build = "python -m build"
+
+[tool.pixi.environments]
+dev = {features = ["dev"], solve-group = "default"}
+default = {solve-group = "default"}

@@ -1,0 +1,618 @@
+{
+  "activities": [
+    {
+      "credits": [
+        {
+          "actor_key": null,
+          "role": "co_author"
+        },
+        {
+          "actor_key": "U_author",
+          "role": "author"
+        },
+        {
+          "actor_key": "U_author",
+          "role": "co_author"
+        },
+        {
+          "actor_key": "git:email:b570f308b3fa3badb2c9eff5583f76ca8988ddde915a41d1b74465f507d182f4",
+          "role": "co_author"
+        }
+      ],
+      "id": "commit:R_example:1111111111111111111111111111111111111111",
+      "metadata": {
+        "authored_at": "2024-01-31T10:00:00Z",
+        "committer": {
+          "actor_key": "U_context",
+          "email": null,
+          "name": "Context committer"
+        },
+        "parent_shas": [
+          "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "cccccccccccccccccccccccccccccccccccccccc"
+        ],
+        "sha": "1111111111111111111111111111111111111111"
+      },
+      "occurred_at": "2024-02-01T12:00:00Z",
+      "subject": {
+        "author_key": "U_author",
+        "kind": "commit",
+        "node_id": "C_1",
+        "number": null,
+        "title": "Commit 1",
+        "url": "https://github.com/example/project/commit/1111111111111111111111111111111111111111"
+      },
+      "type": "commit",
+      "url": "https://github.com/example/project/commit/1111111111111111111111111111111111111111"
+    },
+    {
+      "credits": [
+        {
+          "actor_key": "git:name:11ab89b0bbeeb7f5778466c8a2eefb39ad1b4008ebfaa0364baed0b8fb69542c",
+          "role": "author"
+        }
+      ],
+      "id": "commit:R_example:2222222222222222222222222222222222222222",
+      "metadata": {
+        "authored_at": "2024-01-31T10:00:00Z",
+        "committer": {
+          "actor_key": "U_context",
+          "email": null,
+          "name": "Context committer"
+        },
+        "parent_shas": [],
+        "sha": "2222222222222222222222222222222222222222"
+      },
+      "occurred_at": "2024-02-02T12:00:00Z",
+      "subject": {
+        "author_key": "git:name:11ab89b0bbeeb7f5778466c8a2eefb39ad1b4008ebfaa0364baed0b8fb69542c",
+        "kind": "commit",
+        "node_id": "C_2",
+        "number": null,
+        "title": "Commit 2",
+        "url": "https://github.com/example/project/commit/2222222222222222222222222222222222222222"
+      },
+      "type": "commit",
+      "url": "https://github.com/example/project/commit/2222222222222222222222222222222222222222"
+    },
+    {
+      "credits": [
+        {
+          "actor_key": "U_author",
+          "role": "author"
+        }
+      ],
+      "id": "pr_opened:PR_old",
+      "metadata": {
+        "source_node_id": "PR_old"
+      },
+      "occurred_at": "2024-02-03T12:00:00Z",
+      "subject": {
+        "author_key": "U_author",
+        "kind": "pull_request",
+        "node_id": "PR_old",
+        "number": 2,
+        "title": "An older PR",
+        "url": "https://github.com/example/project/pull/2"
+      },
+      "type": "pr_opened",
+      "url": "https://github.com/example/project/pull/2"
+    },
+    {
+      "credits": [
+        {
+          "actor_key": "U_performer",
+          "role": "merger"
+        }
+      ],
+      "id": "pr_merged:M_1",
+      "metadata": {
+        "merge_commit_sha": null,
+        "source_node_id": "M_1"
+      },
+      "occurred_at": "2024-02-04T12:00:00Z",
+      "subject": {
+        "author_key": "U_author",
+        "kind": "pull_request",
+        "node_id": "PR_old",
+        "number": 2,
+        "title": "An older PR",
+        "url": "https://github.com/example/project/pull/2"
+      },
+      "type": "pr_merged",
+      "url": "https://github.com/example/project/pull/2"
+    },
+    {
+      "credits": [
+        {
+          "actor_key": "U_author",
+          "role": "author"
+        }
+      ],
+      "id": "issue_opened:I_old",
+      "metadata": {
+        "source_node_id": "I_old"
+      },
+      "occurred_at": "2024-02-05T12:00:00Z",
+      "subject": {
+        "author_key": "U_author",
+        "kind": "issue",
+        "node_id": "I_old",
+        "number": 1,
+        "title": "An older issue",
+        "url": "https://github.com/example/project/issues/1"
+      },
+      "type": "issue_opened",
+      "url": "https://github.com/example/project/issues/1"
+    },
+    {
+      "credits": [
+        {
+          "actor_key": "U_performer",
+          "role": "closer"
+        }
+      ],
+      "id": "issue_closed:CL_1",
+      "metadata": {
+        "reason": null,
+        "source_node_id": "CL_1"
+      },
+      "occurred_at": "2024-02-07T12:00:00Z",
+      "subject": {
+        "author_key": "U_author",
+        "kind": "issue",
+        "node_id": "I_old",
+        "number": 1,
+        "title": "An older issue",
+        "url": "https://github.com/example/project/issues/1"
+      },
+      "type": "issue_closed",
+      "url": "https://github.com/example/project/issues/1"
+    },
+    {
+      "credits": [
+        {
+          "actor_key": "U_performer",
+          "role": "reopener"
+        }
+      ],
+      "id": "issue_reopened:RE_1",
+      "metadata": {
+        "source_node_id": "RE_1"
+      },
+      "occurred_at": "2024-02-08T12:00:00Z",
+      "subject": {
+        "author_key": "U_author",
+        "kind": "issue",
+        "node_id": "I_old",
+        "number": 1,
+        "title": "An older issue",
+        "url": "https://github.com/example/project/issues/1"
+      },
+      "type": "issue_reopened",
+      "url": "https://github.com/example/project/issues/1"
+    },
+    {
+      "credits": [
+        {
+          "actor_key": "U_performer",
+          "role": "closer"
+        }
+      ],
+      "id": "issue_closed:CL_2",
+      "metadata": {
+        "reason": "FUTURE_REASON",
+        "source_node_id": "CL_2"
+      },
+      "occurred_at": "2024-02-09T12:00:00Z",
+      "subject": {
+        "author_key": "U_author",
+        "kind": "issue",
+        "node_id": "I_old",
+        "number": 1,
+        "title": "An older issue",
+        "url": "https://github.com/example/project/issues/1"
+      },
+      "type": "issue_closed",
+      "url": "https://github.com/example/project/issues/1"
+    },
+    {
+      "credits": [
+        {
+          "actor_key": "U_performer",
+          "role": "reopener"
+        }
+      ],
+      "id": "issue_reopened:RE_2",
+      "metadata": {
+        "source_node_id": "RE_2"
+      },
+      "occurred_at": "2024-02-10T12:00:00Z",
+      "subject": {
+        "author_key": "U_author",
+        "kind": "issue",
+        "node_id": "I_old",
+        "number": 1,
+        "title": "An older issue",
+        "url": "https://github.com/example/project/issues/1"
+      },
+      "type": "issue_reopened",
+      "url": "https://github.com/example/project/issues/1"
+    },
+    {
+      "credits": [
+        {
+          "actor_key": null,
+          "role": "author"
+        }
+      ],
+      "id": "issue_comment:IC_1",
+      "metadata": {
+        "source_node_id": "IC_1"
+      },
+      "occurred_at": "2024-02-12T12:00:00Z",
+      "subject": {
+        "author_key": "U_author",
+        "kind": "issue",
+        "node_id": "I_old",
+        "number": 1,
+        "title": "An older issue",
+        "url": "https://github.com/example/project/issues/1"
+      },
+      "type": "issue_comment",
+      "url": "https://github.com/example/project/issues/1"
+    },
+    {
+      "credits": [
+        {
+          "actor_key": "B_bot",
+          "role": "author"
+        }
+      ],
+      "id": "pr_conversation_comment:PC_1",
+      "metadata": {
+        "source_node_id": "PC_1"
+      },
+      "occurred_at": "2024-02-13T12:00:00Z",
+      "subject": {
+        "author_key": "U_author",
+        "kind": "pull_request",
+        "node_id": "PR_old",
+        "number": 2,
+        "title": "An older PR",
+        "url": "https://github.com/example/project/pull/2"
+      },
+      "type": "pr_conversation_comment",
+      "url": "https://github.com/example/project/pull/2"
+    },
+    {
+      "credits": [
+        {
+          "actor_key": "U_performer",
+          "role": "author"
+        }
+      ],
+      "id": "pr_inline_review_comment:IN_1",
+      "metadata": {
+        "created_at": "2024-01-31T12:00:00Z",
+        "outdated": true,
+        "publication_confirmed": true,
+        "published_at": "2024-02-14T12:00:00Z",
+        "resolved": true,
+        "review_node_id": null,
+        "source_node_id": "IN_1",
+        "thread_node_id": "T_1",
+        "timestamp_fallback": false
+      },
+      "occurred_at": "2024-02-14T12:00:00Z",
+      "subject": {
+        "author_key": "U_author",
+        "kind": "pull_request",
+        "node_id": "PR_old",
+        "number": 2,
+        "title": "An older PR",
+        "url": "https://github.com/example/project/pull/2"
+      },
+      "type": "pr_inline_review_comment",
+      "url": "https://github.com/example/project/pull/2"
+    },
+    {
+      "credits": [
+        {
+          "actor_key": "B_bot",
+          "role": "author"
+        }
+      ],
+      "id": "pr_inline_review_comment:IN_2",
+      "metadata": {
+        "created_at": "2024-02-15T12:00:00Z",
+        "outdated": true,
+        "publication_confirmed": true,
+        "published_at": null,
+        "resolved": true,
+        "review_node_id": null,
+        "source_node_id": "IN_2",
+        "thread_node_id": "T_2",
+        "timestamp_fallback": true
+      },
+      "occurred_at": "2024-02-15T12:00:00Z",
+      "subject": {
+        "author_key": "U_author",
+        "kind": "pull_request",
+        "node_id": "PR_old",
+        "number": 2,
+        "title": "An older PR",
+        "url": "https://github.com/example/project/pull/2"
+      },
+      "type": "pr_inline_review_comment",
+      "url": "https://github.com/example/project/pull/2"
+    },
+    {
+      "credits": [
+        {
+          "actor_key": "U_performer",
+          "role": "author"
+        }
+      ],
+      "id": "pr_review:RV_1",
+      "metadata": {
+        "source_node_id": "RV_1",
+        "state": "DISMISSED",
+        "submitted_at": "2024-02-16T12:00:00Z"
+      },
+      "occurred_at": "2024-02-16T12:00:00Z",
+      "subject": {
+        "author_key": "U_author",
+        "kind": "pull_request",
+        "node_id": "PR_old",
+        "number": 2,
+        "title": "An older PR",
+        "url": "https://github.com/example/project/pull/2"
+      },
+      "type": "pr_review",
+      "url": "https://github.com/example/project/pull/2"
+    }
+  ],
+  "actors": [
+    {
+      "classification": "bot",
+      "database_id": null,
+      "display_name": "Automation",
+      "git_email": null,
+      "git_name": null,
+      "github_node_id": "B_bot",
+      "key": "B_bot",
+      "login": "automation",
+      "url": null
+    },
+    {
+      "classification": "human",
+      "database_id": null,
+      "display_name": "Alice",
+      "git_email": null,
+      "git_name": null,
+      "github_node_id": "U_author",
+      "key": "U_author",
+      "login": "alice",
+      "url": null
+    },
+    {
+      "classification": "human",
+      "database_id": null,
+      "display_name": null,
+      "git_email": null,
+      "git_name": null,
+      "github_node_id": "U_context",
+      "key": "U_context",
+      "login": null,
+      "url": null
+    },
+    {
+      "classification": "human",
+      "database_id": null,
+      "display_name": "Bob",
+      "git_email": null,
+      "git_name": null,
+      "github_node_id": "U_performer",
+      "key": "U_performer",
+      "login": "bob",
+      "url": null
+    },
+    {
+      "classification": "unresolved_git",
+      "database_id": null,
+      "display_name": null,
+      "git_email": " Git@Example.ORG ",
+      "git_name": "Git Author",
+      "github_node_id": null,
+      "key": "git:email:b570f308b3fa3badb2c9eff5583f76ca8988ddde915a41d1b74465f507d182f4",
+      "login": null,
+      "url": null
+    },
+    {
+      "classification": "unresolved_git",
+      "database_id": null,
+      "display_name": null,
+      "git_email": null,
+      "git_name": "Name Only",
+      "github_node_id": null,
+      "key": "git:name:11ab89b0bbeeb7f5778466c8a2eefb39ad1b4008ebfaa0364baed0b8fb69542c",
+      "login": null,
+      "url": null
+    }
+  ],
+  "metadata": {
+    "collection_finished_at": "2024-03-02T12:05:00Z",
+    "collection_started_at": "2024-03-02T12:00:00Z",
+    "coverage_limitations": [
+      "Titles and review states reflect collection-time metadata."
+    ],
+    "default_branch": "main",
+    "default_branch_head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "month": "2024-02",
+    "month_end": "2024-03-01T00:00:00Z",
+    "month_start": "2024-02-01T00:00:00Z",
+    "ongoing": false,
+    "repository_full_name": "example/project",
+    "repository_node_id": "R_example",
+    "repository_url": "https://github.com/example/project"
+  },
+  "schema_version": "1",
+  "summaries": {
+    "actor_counts": {
+      "B_bot": {
+        "commit": 0,
+        "issue_closed": 0,
+        "issue_comment": 0,
+        "issue_opened": 0,
+        "issue_reopened": 0,
+        "pr_conversation_comment": 1,
+        "pr_inline_review_comment": 1,
+        "pr_merged": 0,
+        "pr_opened": 0,
+        "pr_review": 0
+      },
+      "U_author": {
+        "commit": 1,
+        "issue_closed": 0,
+        "issue_comment": 0,
+        "issue_opened": 1,
+        "issue_reopened": 0,
+        "pr_conversation_comment": 0,
+        "pr_inline_review_comment": 0,
+        "pr_merged": 0,
+        "pr_opened": 1,
+        "pr_review": 0
+      },
+      "U_performer": {
+        "commit": 0,
+        "issue_closed": 2,
+        "issue_comment": 0,
+        "issue_opened": 0,
+        "issue_reopened": 2,
+        "pr_conversation_comment": 0,
+        "pr_inline_review_comment": 1,
+        "pr_merged": 1,
+        "pr_opened": 0,
+        "pr_review": 1
+      },
+      "git:email:b570f308b3fa3badb2c9eff5583f76ca8988ddde915a41d1b74465f507d182f4": {
+        "commit": 1,
+        "issue_closed": 0,
+        "issue_comment": 0,
+        "issue_opened": 0,
+        "issue_reopened": 0,
+        "pr_conversation_comment": 0,
+        "pr_inline_review_comment": 0,
+        "pr_merged": 0,
+        "pr_opened": 0,
+        "pr_review": 0
+      },
+      "git:name:11ab89b0bbeeb7f5778466c8a2eefb39ad1b4008ebfaa0364baed0b8fb69542c": {
+        "commit": 1,
+        "issue_closed": 0,
+        "issue_comment": 0,
+        "issue_opened": 0,
+        "issue_reopened": 0,
+        "pr_conversation_comment": 0,
+        "pr_inline_review_comment": 0,
+        "pr_merged": 0,
+        "pr_opened": 0,
+        "pr_review": 0
+      }
+    },
+    "distinct_actors": {
+      "bot": 1,
+      "human": 2,
+      "total": 5,
+      "unresolved_git": 2
+    },
+    "distinct_actors_by_type": {
+      "commit": {
+        "bot": 0,
+        "human": 1,
+        "total": 3,
+        "unresolved_git": 2
+      },
+      "issue_closed": {
+        "bot": 0,
+        "human": 1,
+        "total": 1,
+        "unresolved_git": 0
+      },
+      "issue_comment": {
+        "bot": 0,
+        "human": 0,
+        "total": 0,
+        "unresolved_git": 0
+      },
+      "issue_opened": {
+        "bot": 0,
+        "human": 1,
+        "total": 1,
+        "unresolved_git": 0
+      },
+      "issue_reopened": {
+        "bot": 0,
+        "human": 1,
+        "total": 1,
+        "unresolved_git": 0
+      },
+      "pr_conversation_comment": {
+        "bot": 1,
+        "human": 0,
+        "total": 1,
+        "unresolved_git": 0
+      },
+      "pr_inline_review_comment": {
+        "bot": 1,
+        "human": 1,
+        "total": 2,
+        "unresolved_git": 0
+      },
+      "pr_merged": {
+        "bot": 0,
+        "human": 1,
+        "total": 1,
+        "unresolved_git": 0
+      },
+      "pr_opened": {
+        "bot": 0,
+        "human": 1,
+        "total": 1,
+        "unresolved_git": 0
+      },
+      "pr_review": {
+        "bot": 0,
+        "human": 1,
+        "total": 1,
+        "unresolved_git": 0
+      }
+    },
+    "repository_counts": {
+      "commit": 2,
+      "issue_closed": 2,
+      "issue_comment": 1,
+      "issue_opened": 1,
+      "issue_reopened": 2,
+      "pr_conversation_comment": 1,
+      "pr_inline_review_comment": 2,
+      "pr_merged": 1,
+      "pr_opened": 1,
+      "pr_review": 1
+    },
+    "unattributed_by_type": {
+      "commit": 0,
+      "issue_closed": 0,
+      "issue_comment": 1,
+      "issue_opened": 0,
+      "issue_reopened": 0,
+      "pr_conversation_comment": 0,
+      "pr_inline_review_comment": 0,
+      "pr_merged": 0,
+      "pr_opened": 0,
+      "pr_review": 0
+    },
+    "unattributed_total": 1
+  }
+}
