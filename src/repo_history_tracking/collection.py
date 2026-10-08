@@ -1,4 +1,4 @@
-"""Synchronous monthly lifecycle collection; no report files are written."""
+"""Synchronous monthly lifecycle, comment, and review collection; no report files are written."""
 
 import re
 from dataclasses import replace
@@ -10,31 +10,40 @@ from .models import (
     Actor,
     Credit,
     IssueClosedMetadata,
+    IssueCommentMetadata,
     IssueOpenedMetadata,
     IssueReopenedMetadata,
     MonthlyReport,
+    PRConversationCommentMetadata,
+    PRInlineReviewCommentMetadata,
     PRMergedMetadata,
     PROpenedMetadata,
+    PRReviewMetadata,
     ReportMetadata,
     Subject,
 )
 from .queries import (
+    ISSUE_COMMENTS_QUERY,
     ISSUE_TIMELINE_QUERY,
     ISSUES_QUERY,
+    PR_COMMENTS_QUERY,
+    PR_REVIEWS_QUERY,
+    PR_THREADS_QUERY,
     PR_TIMELINE_QUERY,
     PULL_REQUESTS_QUERY,
+    THREAD_COMMENTS_QUERY,
 )
 from .reports import build_report
 from .repository import lookup_repository
 from .transport import GraphQLClient
 
 COVERAGE_LIMITATIONS = (
-    "Lifecycle-only collection: comments, reviews, and commits are not collected; "
-    "zero counts for these types do not establish absence of activity.",
+    "Commits are not collected; zero commit counts do not establish absence of activity.",
     "Deleted or inaccessible items and transferred issues can limit historical "
     "reconstruction.",
     "Repository and actor names, subject titles, and URLs reflect collection-time "
     "metadata; historical display names are not reconstructed.",
+    "Review states and thread resolved/outdated flags reflect collection-time metadata.",
     "Collection is not a transactional GitHub snapshot; concurrent changes and "
     "newly available data may revise results on a later rerun.",
 )
@@ -60,9 +69,9 @@ def _month_bounds(year: int, month: int) -> tuple[datetime, datetime]:
 def collect_month(
     owner: str, repo: str, year: int, month: int, *, token: str | None = None
 ) -> MonthlyReport:
-    """Return a validated lifecycle-only report for one UTC calendar month.
+    """Return a validated lifecycle, comment, and review report for one UTC calendar month.
 
-    Comments, reviews, and commits are not yet collected. See the report's
+    Commits are not yet collected. See the report's
     coverage limitations before interpreting zero counts. A failed traversal
     raises without returning a partial report. Authentication falls back to
     GH_TOKEN, then GITHUB_TOKEN. The client is always closed on exit.
@@ -96,8 +105,12 @@ def _string(item: dict, name: str, operation: str, *, nullable=False, empty=Fals
     raise GraphQLError(f"malformed lifecycle field: {name}", operation=operation)
 
 
-def _timestamp(item: dict, operation: str) -> datetime:
-    value = _string(item, "createdAt", operation)
+def _timestamp(
+    item: dict, operation: str, name="createdAt", *, nullable=False
+) -> datetime | None:
+    value = _string(item, name, operation, nullable=nullable)
+    if value is None:
+        return None
     try:
         result = datetime.fromisoformat(value)
         if result.tzinfo is None:
@@ -215,6 +228,10 @@ def _collect_parents(client, repository_id, start, end, records, *, issues):
                 operation,
             )
         _collect_timeline(client, subject, author, start, end, records, issues=issues)
+        _collect_comments(client, subject, author, start, end, records, issues=issues)
+        if not issues:
+            _collect_reviews(client, subject, author, start, end, records)
+            _collect_threads(client, subject, author, start, end, records)
 
 
 def _collect_timeline(client, subject, author, start, end, records, *, issues):
@@ -271,6 +288,176 @@ def _collect_timeline(client, subject, author, start, end, records, *, issues):
                 (author, performer),
                 operation,
             )
+
+
+def _nodes(client, query, operation, node_id, field):
+    return client.iter_connection(
+        query,
+        {"id": node_id},
+        operation_name=operation,
+        connection_path=("node", field),
+    )
+
+
+def _add_authored(
+    records,
+    item,
+    subject,
+    subject_author,
+    occurred,
+    kind,
+    details,
+    start,
+    end,
+    operation,
+):
+    source_id = _string(item, "id", operation)
+    author = _actor(_field(item, "author", operation), operation)
+    url = _string(item, "url", operation)
+    if start <= occurred < end:
+        records.add(
+            Activity(
+                f"{kind}:{source_id}",
+                kind,
+                occurred,
+                url,
+                subject,
+                (Credit(author.key if author else None, "author"),),
+                details,
+            ),
+            (subject_author, author),
+            operation,
+        )
+
+
+def _collect_comments(client, subject, author, start, end, records, *, issues):
+    operation = "IssueComments" if issues else "PullRequestComments"
+    query = ISSUE_COMMENTS_QUERY if issues else PR_COMMENTS_QUERY
+    kind = "issue_comment" if issues else "pr_conversation_comment"
+    metadata = IssueCommentMetadata if issues else PRConversationCommentMetadata
+    for value in _nodes(client, query, operation, subject.node_id, "comments"):
+        item = _object(value, operation)
+        occurred = _timestamp(item, operation)
+        details = metadata(_string(item, "id", operation))
+        _add_authored(
+            records,
+            item,
+            subject,
+            author,
+            occurred,
+            kind,
+            details,
+            start,
+            end,
+            operation,
+        )
+
+
+def _collect_reviews(client, subject, author, start, end, records):
+    operation = "PullRequestReviews"
+    for value in _nodes(
+        client, PR_REVIEWS_QUERY, operation, subject.node_id, "reviews"
+    ):
+        item = _object(value, operation)
+        source_id = _string(item, "id", operation)
+        state = _string(item, "state", operation, nullable=True)
+        submitted = _timestamp(item, operation, "submittedAt", nullable=True)
+        if state is not None and state.upper() == "PENDING":
+            if submitted is not None:
+                raise GraphQLError(
+                    "pending review has submission timestamp", operation=operation
+                )
+            continue
+        if submitted is None:
+            raise GraphQLError(
+                "review submission cannot be established", operation=operation
+            )
+        _add_authored(
+            records,
+            item,
+            subject,
+            author,
+            submitted,
+            "pr_review",
+            PRReviewMetadata(source_id, submitted, state),
+            start,
+            end,
+            operation,
+        )
+
+
+def _boolean(item, name, operation):
+    value = _field(item, name, operation)
+    if type(value) is not bool:
+        raise GraphQLError(f"malformed boolean field: {name}", operation=operation)
+    return value
+
+
+def _collect_threads(client, subject, author, start, end, records):
+    operation = "PullRequestReviewThreads"
+    for value in _nodes(
+        client, PR_THREADS_QUERY, operation, subject.node_id, "reviewThreads"
+    ):
+        thread = _object(value, operation)
+        thread_id = _string(thread, "id", operation)
+        resolved = _boolean(thread, "isResolved", operation)
+        outdated = _boolean(thread, "isOutdated", operation)
+        _collect_inline_comments(
+            client, subject, author, thread_id, resolved, outdated, start, end, records
+        )
+
+
+def _collect_inline_comments(
+    client, subject, author, thread_id, resolved, outdated, start, end, records
+):
+    operation = "ReviewThreadComments"
+    for value in _nodes(
+        client, THREAD_COMMENTS_QUERY, operation, thread_id, "comments"
+    ):
+        item = _object(value, operation)
+        source_id = _string(item, "id", operation)
+        created = _timestamp(item, operation)
+        published = _timestamp(item, operation, "publishedAt", nullable=True)
+        state = _string(item, "state", operation)
+        if state.upper() == "PENDING":
+            if published is not None:
+                raise GraphQLError(
+                    "pending comment has publication timestamp", operation=operation
+                )
+            continue
+        if published is None and state.upper() != "SUBMITTED":
+            raise GraphQLError(
+                "comment publication cannot be established", operation=operation
+            )
+        review = _field(item, "pullRequestReview", operation)
+        review_id = (
+            None
+            if review is None
+            else _string(_object(review, operation), "id", operation)
+        )
+        details = PRInlineReviewCommentMetadata(
+            source_id,
+            review_id,
+            thread_id,
+            created,
+            published,
+            True,
+            resolved,
+            outdated,
+            published is None,
+        )
+        _add_authored(
+            records,
+            item,
+            subject,
+            author,
+            published or created,
+            "pr_inline_review_comment",
+            details,
+            start,
+            end,
+            operation,
+        )
 
 
 def _collect_month(client, owner, repo, start, end, started) -> MonthlyReport:

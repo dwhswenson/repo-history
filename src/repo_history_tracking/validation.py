@@ -269,12 +269,6 @@ def _validate_semantics(report: MonthlyReport, *, check_summaries: bool) -> None
                 p + ".occurred_at",
                 "must use publication timestamp or recorded fallback",
             )
-            _require(
-                details.published_at is None
-                or details.created_at <= details.published_at,
-                p + ".metadata.published_at",
-                "publication precedes creation",
-            )
     if check_summaries:
         expected = derive_summaries(report.actors, report.activities)
         _require(

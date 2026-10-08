@@ -1,9 +1,9 @@
 # Repository history tracking
 
-Phases 1–3 provide a monthly report contract, a synchronous GitHub GraphQL
-foundation, and monthly issue/PR lifecycle collection. Comments, reviews, and
-commits are planned in later phases, as are report file writing, CLI, and
-backfill; see [SPEC.md](SPEC.md).
+Phases 1–4 provide a monthly report contract, a synchronous GitHub GraphQL
+foundation, and monthly issue/PR lifecycle, comment, and review collection.
+Commits, report file writing, CLI, and backfill are planned in later phases;
+see [SPEC.md](SPEC.md).
 
 Requires Python 3.12+. Packaging and Pixi configuration are maintained together in
 `pyproject.toml`. Install with `pip install .`, or use the existing Pixi workspace:
@@ -23,7 +23,7 @@ in `tests/conftest.py` and `tests/helpers.py`; `tests/test_packaging.py` covers
 distribution integration. Pytest uses standard test filename discovery under
 `tests`, with importlib mode.
 
-## Monthly lifecycle collection
+## Monthly activity collection
 
 ```python
 from repo_history_tracking import collect_month, report_to_json, validate_report
@@ -39,9 +39,10 @@ text = report_to_json(report)
 
 `collect_month(owner, repo, year, month, *, token=None)` returns a validated
 `MonthlyReport` containing `issue_opened`, `issue_closed`, `issue_reopened`,
-`pr_opened`, and `pr_merged` activities. **This is a lifecycle-only report:**
-comments, reviews, and commits are not collected yet. Their zero counts do not
-establish absence of activity; this limitation is recorded in
+`pr_opened`, `pr_merged`, `issue_comment`, `pr_conversation_comment`,
+`pr_review`, and `pr_inline_review_comment` activities. Commits are not collected
+yet; zero commit counts do not establish absence of activity. This limitation is
+recorded in
 `metadata.coverage_limitations`. No files are written.
 
 Months use exact UTC half-open boundaries. Future months and invalid inputs are
@@ -50,9 +51,10 @@ if the run finishes in a later month. Repository identity and the default-branch
 head are captured once before traversal, including a null head for an empty
 repository. The function owns and closes its client, including on failure.
 
-All issue/PR parent pages and relevant lifecycle timeline pages are traversed
-independently, without creation-date or current-state filters. This finds events
-on older parents but can be expensive for large repositories. Requests begin
+All issue/PR parent pages, lifecycle timelines, conversation comments, reviews,
+review threads, and thread comments are traversed independently, without
+creation-date or current-state filters. This finds events on older parents but
+can be expensive for large repositories. Requests begin
 with 100-item pages and reuse the client's page reductions and retry policy.
 Issue collection is skipped and recorded as a limitation when issues are
 disabled; PR collection still runs. The collector performs no persistent caching.
@@ -63,7 +65,25 @@ closure/reopening counts separately; closure reasons come from the individual
 event, never the issue's current reason. Missing performers and reasons remain
 null. Reopening activities have null event URLs because their source event does
 not expose a URL. A merge's commit SHA is context and does not count as commit
-activity. Draft PR openings are included.
+activity. Draft PR openings and published activity on draft PRs are included.
+
+Conversation comments use creation time. Submitted reviews use submission time,
+including reviews currently dismissed; pending reviews are excluded. A review
+counts once even when it has no body, and its body never counts as another comment.
+Inline comments and replies are collected through every review thread, including
+resolved and outdated threads. Each published comment counts separately, using
+its publication timestamp, even if created in an earlier month. Thread flags and
+review states reflect collection-time metadata. GitHub may report publication
+slightly before comment creation; both source timestamps are preserved, and
+publication time still determines the reporting month.
+
+Inline comments with `PENDING` state are excluded. A publication timestamp confirms
+publication; without one, `SUBMITTED` state confirms publication and creation time
+is used with an explicit timestamp-fallback flag. An unknown state with no
+publication timestamp fails collection. Contradictory pending/publication evidence
+also fails. Non-pending reviews without submission timestamps fail. Review IDs
+may be null; thread IDs and parent subject context are retained. These independent
+nested requests can be expensive on repositories with long review histories.
 
 Actor identities use GitHub node IDs, with `User` classified as human and `Bot`
 as bot. Unsupported actor types fail explicitly. Only actors referenced by
@@ -74,9 +94,10 @@ pagination failures, and API failures raise without returning a partial report.
 Report contract failures raise `ReportValidationError`.
 
 The offline acceptance history is in `tests/test_collection.py`, particularly
-`test_multi_month_history`. It checks explicit event IDs, attribution, counts,
-independent parent/timeline cursors, reruns, and collection of a different month
-from the same source history. Run it with:
+`test_multi_month_history` and `test_comments_reviews_multi_month_history`.
+They check explicit event IDs, attribution, counts, independent cursors for all
+connections, reruns, and collection of a different month from the same source
+history. Run it with:
 
 ```text
 pixi run -e dev test tests/test_collection.py
@@ -263,7 +284,9 @@ counts are stored.
 Deleted comments, inaccessible items, removed commits, and transferred issues
 can limit reconstruction. Repository/actor node IDs survive renames, but historical
 display names are not reconstructed. Titles, resolved/outdated thread flags, and
-review states reflect collection-time metadata. Captured-head history does not
+review states reflect collection-time metadata. GitHub may report publication
+slightly before comment creation; both source timestamps are preserved, and
+publication time still determines the reporting month. Captured-head history does not
 establish when a commit reached the branch. Force-pushes, rebases, changed default
 branches, and newly available data can revise rerun results. Collection is not a
 transactional snapshot; concurrent changes may appear on a later rerun.

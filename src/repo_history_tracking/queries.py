@@ -168,3 +168,69 @@ query PullRequestLifecycle($id: ID!, $first: Int!, $after: String) {
 }
 """
 )
+
+
+COMMENT_FRAGMENT = """
+fragment ConversationComment on IssueComment {
+  id
+  createdAt
+  url
+  author { ...LifecycleActor }
+}
+"""
+
+
+def _connection_query(operation, parent_type, field, fields, fragments=""):
+    return (
+        fragments
+        + PAGE_INFO_FRAGMENT
+        + f"""
+query {operation}($id: ID!, $first: Int!, $after: String) {{
+  node(id: $id) {{
+    ... on {parent_type} {{
+      {field}(first: $first, after: $after) {{
+        nodes {{ {fields} }}
+        pageInfo {{ ...ForwardPageInfo }}
+      }}
+    }}
+  }}
+}}
+"""
+    )
+
+
+ISSUE_COMMENTS_QUERY = _connection_query(
+    "IssueComments",
+    "Issue",
+    "comments",
+    "...ConversationComment",
+    ACTOR_FRAGMENT + COMMENT_FRAGMENT,
+)
+PR_COMMENTS_QUERY = _connection_query(
+    "PullRequestComments",
+    "PullRequest",
+    "comments",
+    "...ConversationComment",
+    ACTOR_FRAGMENT + COMMENT_FRAGMENT,
+)
+PR_REVIEWS_QUERY = _connection_query(
+    "PullRequestReviews",
+    "PullRequest",
+    "reviews",
+    "id submittedAt state url author { ...LifecycleActor }",
+    ACTOR_FRAGMENT,
+)
+PR_THREADS_QUERY = _connection_query(
+    "PullRequestReviewThreads",
+    "PullRequest",
+    "reviewThreads",
+    "id isResolved isOutdated",
+)
+THREAD_COMMENTS_QUERY = _connection_query(
+    "ReviewThreadComments",
+    "PullRequestReviewThread",
+    "comments",
+    "id createdAt publishedAt state url author { ...LifecycleActor } "
+    "pullRequestReview { id }",
+    ACTOR_FRAGMENT,
+)

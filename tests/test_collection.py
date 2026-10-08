@@ -124,11 +124,13 @@ def test_multi_month_history(session):
                     event("E_march", date="2024-03-01T00:00:00Z"),
                 ],
             ),
+            connection("comments"),
             connection(
                 "issues",
                 [parent("I_new", date="2024-02-01T00:00:00Z", author=actor("U_new"))],
             ),
             connection("timelineItems"),
+            connection("comments"),
             connection(
                 "pullRequests",
                 [parent("P_old", author=actor("U_pr_author"))],
@@ -148,6 +150,9 @@ def test_multi_month_history(session):
                 cursor="merges-1",
             ),
             connection("timelineItems"),
+            connection("comments"),
+            connection("reviews"),
+            connection("reviewThreads"),
             connection(
                 "pullRequests",
                 [
@@ -160,6 +165,9 @@ def test_multi_month_history(session):
                 ],
             ),
             connection("timelineItems"),
+            connection("comments"),
+            connection("reviews"),
+            connection("reviewThreads"),
         ]
 
     report = collect(session, history())
@@ -209,7 +217,7 @@ def test_multi_month_history(session):
     assert report.metadata.repository_full_name == "new-owner/new-name"
     assert report.metadata.month_end == datetime(2024, 3, 1, tzinfo=timezone.utc)
     assert not report.metadata.ongoing
-    assert "Lifecycle-only" in report.metadata.coverage_limitations[0]
+    assert "Commits are not collected" in report.metadata.coverage_limitations[0]
     api.validate_report(report)
     assert api.report_from_json(api.report_to_json(report)) == report
 
@@ -219,13 +227,21 @@ def test_multi_month_history(session):
         ("RepositoryIssues", None),
         ("IssueLifecycle", None),
         ("IssueLifecycle", "timeline-1"),
+        ("IssueComments", None),
         ("RepositoryIssues", "issues-1"),
         ("IssueLifecycle", None),
+        ("IssueComments", None),
         ("RepositoryPullRequests", None),
         ("PullRequestLifecycle", None),
         ("PullRequestLifecycle", "merges-1"),
+        ("PullRequestComments", None),
+        ("PullRequestReviews", None),
+        ("PullRequestReviewThreads", None),
         ("RepositoryPullRequests", "prs-1"),
         ("PullRequestLifecycle", None),
+        ("PullRequestComments", None),
+        ("PullRequestReviews", None),
+        ("PullRequestReviewThreads", None),
     ]
     assert payloads[1]["variables"] == {"id": "R_example", "first": 100, "after": None}
     assert payloads[2]["variables"]["id"] == "I_old"
@@ -250,6 +266,7 @@ def test_closure_event_reason_not_current_issue_reason(session, reason):
             repository(hasIssuesEnabled=True),
             connection("issues", [parent(stateReason="UNRELATED_CURRENT_REASON")]),
             connection("timelineItems", [event(stateReason=reason)]),
+            connection("comments"),
             connection("pullRequests"),
         ],
     )
@@ -266,9 +283,12 @@ def test_missing_performer_and_subject_author(session, kind):
             "timelineItems",
             [event(kind=kind, actor=None, **({"commit": None} if not issues else {}))],
         ),
+        connection("comments"),
     ]
     if issues:
         responses.append(connection("pullRequests"))
+    else:
+        responses.extend([connection("reviews"), connection("reviewThreads")])
     report = collect(session, responses)
     assert not report.actors
     assert report.activities[0].subject.author_key is None
@@ -295,6 +315,9 @@ def test_actor_registry_renames_and_null_metadata(session):
                     )
                 ],
             ),
+            connection("comments"),
+            connection("reviews"),
+            connection("reviewThreads"),
         ],
     )
     assert len(report.actors) == 1
@@ -314,6 +337,9 @@ def test_unretained_context_actors_are_not_registered(session):
                 "timelineItems",
                 [event(kind="MergedEvent", date="2024-03-01T00:00:00Z")],
             ),
+            connection("comments"),
+            connection("reviews"),
+            connection("reviewThreads"),
         ],
     )
     assert not report.activities and not report.actors
@@ -388,6 +414,9 @@ def test_month_boundaries_and_offset_timestamps(session, year, month, end):
                     ),
                 ],
             ),
+            connection("comments"),
+            connection("reviews"),
+            connection("reviewThreads"),
         ],
         year=year,
         month=month,
@@ -470,6 +499,9 @@ def test_malformed_events_fail(session, change):
         repository(),
         connection("pullRequests", [parent()]),
         connection("timelineItems", [event(kind="MergedEvent", **change)]),
+        connection("comments"),
+        connection("reviews"),
+        connection("reviewThreads"),
     ]
     with pytest.raises(api.GraphQLError):
         api.collect_month("owner", "repo", 2024, 2, token="test")
@@ -500,6 +532,9 @@ def test_missing_required_field_is_not_treated_as_null(session):
         repository(),
         connection("pullRequests", [parent()]),
         connection("timelineItems", [merge]),
+        connection("comments"),
+        connection("reviews"),
+        connection("reviewThreads"),
     ]
     with pytest.raises(api.GraphQLError, match="actor"):
         api.collect_month("owner", "repo", 2024, 2, token="test")
@@ -516,6 +551,9 @@ def test_duplicate_events(session, conflicting):
         connection("pullRequests", [parent()]),
         connection("timelineItems", [first], more=True, cursor="next"),
         connection("timelineItems", [second]),
+        connection("comments"),
+        connection("reviews"),
+        connection("reviewThreads"),
     ]
     if conflicting:
         with pytest.raises(api.GraphQLError, match="conflicting lifecycle event ID"):
@@ -546,7 +584,483 @@ def test_conflicting_actor_classification_fails(session):
         connection(
             "timelineItems", [event(kind="MergedEvent", actor=actor(kind="Bot"))]
         ),
+        connection("comments"),
+        connection("reviews"),
+        connection("reviewThreads"),
     ]
     with pytest.raises(api.GraphQLError, match="conflicting actor classification"):
         api.collect_month("owner", "repo", 2024, 2, token="test")
     assert session.closed
+
+
+def comment(key="C_one", **updates):
+    result = {
+        "id": key,
+        "createdAt": "2024-02-10T00:00:00Z",
+        "url": f"https://github.com/owner/repo/comment/{key}",
+        "author": actor("U_commenter"),
+    }
+    result.update(updates)
+    return result
+
+
+def review(key="V_one", **updates):
+    result = comment(key)
+    result.pop("createdAt")
+    result.update(submittedAt="2024-02-11T00:00:00Z", state="COMMENTED")
+    result.update(updates)
+    return result
+
+
+def inline(key="C_inline", **updates):
+    result = comment(key)
+    result.update(
+        publishedAt="2024-02-12T00:00:00Z",
+        state="SUBMITTED",
+        pullRequestReview={"id": "V_one"},
+    )
+    result.update(updates)
+    return result
+
+
+def thread(key="T_one", **updates):
+    return {"id": key, "isResolved": True, "isOutdated": True, **updates}
+
+
+def pr_history(*, comments=(), reviews=(), threads=()):
+    return [
+        repository(),
+        connection("pullRequests", [parent("P_old", isDraft=True, state="CLOSED")]),
+        connection("timelineItems"),
+        connection("comments", comments),
+        connection("reviews", reviews),
+        *threads,
+    ]
+
+
+def test_comments_reviews_multi_month_history(session):
+    def history():
+        return [
+            repository(hasIssuesEnabled=True),
+            connection(
+                "issues",
+                [
+                    parent(state="CLOSED"),
+                    parent("I_new", date="2024-02-01T00:00:00Z", author=actor("U_new")),
+                ],
+            ),
+            connection(
+                "timelineItems", [event(), event("E_reopen", kind="ReopenedEvent")]
+            ),
+            connection(
+                "comments", [comment("C_issue", author=None)], more=True, cursor="ic"
+            ),
+            connection(
+                "comments", [comment("C_before", createdAt="2024-01-31T23:59:59Z")]
+            ),
+            connection("timelineItems"),
+            connection("comments"),
+            connection(
+                "pullRequests",
+                [parent("P_old", state="MERGED", isDraft=True)],
+                more=True,
+                cursor="pr",
+            ),
+            connection("timelineItems", [event(kind="MergedEvent")]),
+            connection("comments", [comment("C_pr")], more=True, cursor="pc"),
+            connection(
+                "comments", [comment("C_end", createdAt="2024-03-01T00:00:00Z")]
+            ),
+            connection("reviews", [review(state="DISMISSED")], more=True, cursor="rv"),
+            connection(
+                "reviews",
+                [
+                    review(
+                        "V_pending",
+                        state="PENDING",
+                        submittedAt=None,
+                        author=actor("U_excluded"),
+                    )
+                ],
+            ),
+            connection("reviewThreads", [thread()], more=True, cursor="th"),
+            connection(
+                "comments",
+                [inline(createdAt="2024-01-31T00:00:00Z")],
+                more=True,
+                cursor="tc",
+            ),
+            connection(
+                "comments",
+                [
+                    inline(
+                        "C_reply",
+                        pullRequestReview=None,
+                        author=actor("B_reply", kind="Bot"),
+                    )
+                ],
+            ),
+            connection(
+                "reviewThreads", [thread("T_two", isResolved=False, isOutdated=False)]
+            ),
+            connection(
+                "comments",
+                [
+                    inline("C_fallback", publishedAt=None),
+                    inline("C_pending", publishedAt=None, state="PENDING"),
+                ],
+            ),
+            connection(
+                "pullRequests",
+                [parent("P_new", date="2024-02-01T00:00:00Z", author=actor("U_new"))],
+            ),
+            connection("timelineItems"),
+            connection("comments"),
+            connection("reviews"),
+            connection("reviewThreads"),
+        ]
+
+    report = collect(session, history())
+    by_id = {a.id: a for a in report.activities}
+    assert set(by_id) == {
+        "issue_opened:I_new",
+        "issue_reopened:E_reopen",
+        "issue_closed:E_close",
+        "issue_comment:C_issue",
+        "pr_merged:E_close",
+        "pr_opened:P_new",
+        "pr_conversation_comment:C_pr",
+        "pr_review:V_one",
+        "pr_inline_review_comment:C_inline",
+        "pr_inline_review_comment:C_reply",
+        "pr_inline_review_comment:C_fallback",
+    }
+    assert by_id["pr_review:V_one"].metadata.state == "DISMISSED"
+    assert by_id["pr_inline_review_comment:C_inline"].occurred_at.day == 12
+    assert by_id["pr_inline_review_comment:C_reply"].metadata.review_node_id is None
+    assert by_id["pr_inline_review_comment:C_reply"].metadata.resolved
+    assert by_id["pr_inline_review_comment:C_reply"].metadata.outdated
+    fallback = by_id["pr_inline_review_comment:C_fallback"]
+    assert (
+        fallback.metadata.timestamp_fallback and fallback.metadata.publication_confirmed
+    )
+    assert not fallback.metadata.resolved and not fallback.metadata.outdated
+    assert fallback.occurred_at == fallback.metadata.created_at
+    assert report.summaries.repository_counts["pr_inline_review_comment"] == 3
+    assert report.summaries.unattributed_by_type["issue_comment"] == 1
+    assert "U_excluded" not in {a.key for a in report.actors}
+    assert "U_author" not in report.summaries.actor_counts
+    api.validate_report(report)
+    assert api.report_from_json(api.report_to_json(report)) == report
+    payloads = [call[1]["json"] for call in session.calls]
+    continuations = [
+        (p["operationName"], p["variables"]["id"], p["variables"]["after"])
+        for p in payloads[1:]
+        if p["variables"]["after"]
+    ]
+    assert continuations == [
+        ("IssueComments", "I_old", "ic"),
+        ("PullRequestComments", "P_old", "pc"),
+        ("PullRequestReviews", "P_old", "rv"),
+        ("ReviewThreadComments", "T_one", "tc"),
+        ("PullRequestReviewThreads", "P_old", "th"),
+        ("RepositoryPullRequests", "R_example", "pr"),
+    ]
+    session.closed = False
+    assert collect(session, history()) == report
+    session.closed = False
+    january = collect(session, history(), month=1)
+    assert "issue_comment:C_before" in {a.id for a in january.activities}
+    assert "pr_inline_review_comment:C_inline" not in {a.id for a in january.activities}
+
+
+@pytest.mark.parametrize("kind", ["conversation", "review", "inline"])
+@pytest.mark.parametrize("conflicting", [False, True])
+def test_duplicate_authored_events(session, kind, conflicting):
+    item = {"conversation": comment, "review": review, "inline": inline}[kind]()
+    duplicate = deepcopy(item)
+    if conflicting:
+        duplicate["author"] = actor("U_other")
+    history = pr_history(
+        comments=[item, duplicate] if kind == "conversation" else [],
+        reviews=[item, duplicate] if kind == "review" else [],
+        threads=[
+            connection("reviewThreads", [thread()]),
+            connection("comments", [item, duplicate]),
+        ]
+        if kind == "inline"
+        else [connection("reviewThreads")],
+    )
+    if conflicting:
+        session.responses = history
+        with pytest.raises(api.GraphQLError, match="conflicting lifecycle event ID"):
+            api.collect_month("owner", "repo", 2024, 2, token="test")
+        assert session.closed
+    else:
+        report = collect(session, history)
+        assert len(report.activities) == 1
+        assert sum(report.summaries.repository_counts.values()) == 1
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"publishedAt": None, "state": "FUTURE"},
+        {"publishedAt": "2024-02-12T00:00:00Z", "state": "PENDING"},
+        {"publishedAt": "invalid"},
+        {"createdAt": "2024-02-10T00:00:00"},
+        {"author": {}},
+        {"pullRequestReview": {}},
+        {"state": None},
+    ],
+)
+def test_invalid_inline_comment_fails(session, changes):
+    session.responses = pr_history(
+        threads=[
+            connection("reviewThreads", [thread()]),
+            connection("comments", [inline(**changes)]),
+        ]
+    )
+    with pytest.raises(api.GraphQLError):
+        api.collect_month("owner", "repo", 2024, 2, token="test")
+    assert session.closed
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"submittedAt": None},
+        {"submittedAt": "invalid"},
+        {"submittedAt": "2024-02-01T00:00:00"},
+        {"state": "PENDING"},
+    ],
+)
+def test_invalid_review_fails(session, changes):
+    session.responses = pr_history(reviews=[review(**changes)])
+    with pytest.raises(api.GraphQLError):
+        api.collect_month("owner", "repo", 2024, 2, token="test")
+    assert session.closed
+
+
+@pytest.mark.parametrize(
+    "state", ["APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED", "FUTURE", None]
+)
+def test_submitted_review_states_and_null_author(session, state):
+    report = collect(
+        session,
+        pr_history(
+            reviews=[review(state=state, author=None)],
+            threads=[connection("reviewThreads")],
+        ),
+    )
+    assert report.activities[0].metadata.state == state
+    assert report.summaries.unattributed_by_type["pr_review"] == 1
+
+
+@pytest.mark.parametrize("field", ["reviewThreads", "comments", "reviews"])
+def test_null_nested_nodes_fail(session, field):
+    history = pr_history(threads=[connection("reviewThreads")])
+    index = {"comments": 3, "reviews": 4, "reviewThreads": 5}[field]
+    history[index] = connection(field, [None])
+    session.responses = history
+    with pytest.raises(api.GraphQLError):
+        api.collect_month("owner", "repo", 2024, 2, token="test")
+    assert session.closed
+
+
+@pytest.mark.parametrize(
+    "tail", [errors("FORBIDDEN"), connection("comments", more=True, cursor="repeat")]
+)
+def test_late_thread_comment_failure(session, tail):
+    session.responses = pr_history(
+        threads=[
+            connection("reviewThreads", [thread()]),
+            connection("comments", [inline()], more=True, cursor="repeat"),
+            tail,
+        ]
+    )
+    with pytest.raises(api.GitHubAPIError):
+        api.collect_month("owner", "repo", 2024, 2, token="test")
+    assert session.closed
+
+
+def test_nested_comment_page_reduction(session, monkeypatch):
+    monkeypatch.setattr(
+        "repo_history_tracking.transport.time.sleep", lambda *args: None
+    )
+    report = collect(
+        session,
+        pr_history(
+            threads=[
+                connection("reviewThreads", [thread()]),
+                errors("MAX_NODE_LIMIT_EXCEEDED"),
+                connection("comments", [inline()], more=True, cursor="tc"),
+                connection("comments"),
+            ]
+        ),
+    )
+    assert len(report.activities) == 1
+    payloads = [
+        call[1]["json"]
+        for call in session.calls
+        if call[1]["json"]["operationName"] == "ReviewThreadComments"
+    ]
+    assert [(p["variables"]["first"], p["variables"]["after"]) for p in payloads] == [
+        (100, None),
+        (50, None),
+        (50, "tc"),
+    ]
+
+
+@pytest.mark.parametrize("kind", ["conversation", "review", "inline"])
+@pytest.mark.parametrize(
+    "date,kept",
+    [
+        ("2024-02-01T01:00:00+01:00", True),
+        ("2024-03-01T01:00:00+01:00", False),
+        ("2024-02-29T23:59:59Z", True),
+    ],
+)
+def test_authored_activity_month_boundaries(session, kind, date, kept):
+    report = collect(
+        session,
+        pr_history(
+            comments=[comment(createdAt=date)] if kind == "conversation" else [],
+            reviews=[review(submittedAt=date)] if kind == "review" else [],
+            threads=[
+                connection("reviewThreads", [thread()]),
+                connection(
+                    "comments",
+                    [inline(createdAt="2024-01-01T00:00:00Z", publishedAt=date)],
+                ),
+            ]
+            if kind == "inline"
+            else [connection("reviewThreads")],
+        ),
+    )
+    assert len(report.activities) == int(kept)
+    if not kept:
+        assert not report.actors
+
+
+@pytest.mark.parametrize(
+    "changes", [{"isResolved": None}, {"isOutdated": 1}, {"id": None}]
+)
+def test_malformed_thread_fails(session, changes):
+    session.responses = pr_history(
+        threads=[connection("reviewThreads", [thread(**changes)])]
+    )
+    with pytest.raises(api.GraphQLError):
+        api.collect_month("owner", "repo", 2024, 2, token="test")
+    assert session.closed
+
+
+@pytest.mark.parametrize(
+    "kind,field",
+    [
+        ("conversation", "author"),
+        ("conversation", "createdAt"),
+        ("review", "submittedAt"),
+        ("review", "state"),
+        ("inline", "publishedAt"),
+        ("inline", "pullRequestReview"),
+    ],
+)
+def test_missing_authored_source_field_fails(session, kind, field):
+    item = {"conversation": comment, "review": review, "inline": inline}[kind]()
+    del item[field]
+    session.responses = pr_history(
+        comments=[item] if kind == "conversation" else [],
+        reviews=[item] if kind == "review" else [],
+        threads=[
+            connection("reviewThreads", [thread()]),
+            connection("comments", [item]),
+        ]
+        if kind == "inline"
+        else [connection("reviewThreads")],
+    )
+    with pytest.raises(api.GraphQLError, match=field):
+        api.collect_month("owner", "repo", 2024, 2, token="test")
+    assert session.closed
+
+
+def test_inline_unknown_state_with_publication_and_null_author(session):
+    report = collect(
+        session,
+        pr_history(
+            threads=[
+                connection("reviewThreads", [thread()]),
+                connection("comments", [inline(state="FUTURE", author=None)]),
+            ]
+        ),
+    )
+    assert report.activities[0].credits == (api.Credit(None, "author"),)
+    assert report.summaries.unattributed_by_type["pr_inline_review_comment"] == 1
+    assert not report.activities[0].metadata.timestamp_fallback
+
+
+def test_inline_fallback_uses_creation_month(session):
+    report = collect(
+        session,
+        pr_history(
+            threads=[
+                connection("reviewThreads", [thread()]),
+                connection(
+                    "comments",
+                    [inline(createdAt="2024-01-31T23:59:59Z", publishedAt=None)],
+                ),
+            ]
+        ),
+    )
+    assert not report.activities and not report.actors
+
+
+def test_duplicate_inline_comments_across_pages(session):
+    item = inline()
+    report = collect(
+        session,
+        pr_history(
+            threads=[
+                connection("reviewThreads", [thread()]),
+                connection("comments", [item], more=True, cursor="tc"),
+                connection("comments", [deepcopy(item)]),
+            ]
+        ),
+    )
+    assert report.summaries.repository_counts["pr_inline_review_comment"] == 1
+
+
+@pytest.mark.parametrize(
+    "created,published,kept",
+    [
+        ("2024-02-10T18:23:22Z", "2024-02-10T18:23:21Z", True),
+        ("2024-03-01T00:00:00Z", "2024-02-29T23:59:59Z", True),
+        ("2024-01-30T18:23:22Z", "2024-01-30T18:23:21Z", False),
+    ],
+)
+def test_inline_publication_before_creation_preserves_source_times(
+    session, created, published, kept
+):
+    # GitHub comment 2747458489 exhibits this one-second inversion.
+    report = collect(
+        session,
+        pr_history(
+            threads=[
+                connection("reviewThreads", [thread()]),
+                connection(
+                    "comments", [inline(createdAt=created, publishedAt=published)]
+                ),
+            ]
+        ),
+    )
+    assert len(report.activities) == int(kept)
+    if kept:
+        activity = report.activities[0]
+        assert activity.occurred_at == datetime.fromisoformat(published)
+        assert activity.metadata.published_at == datetime.fromisoformat(published)
+        assert activity.metadata.created_at == datetime.fromisoformat(created)
+        assert activity.metadata.publication_confirmed
+        assert not activity.metadata.timestamp_fallback
+        assert api.report_from_json(api.report_to_json(report)) == report
+    else:
+        assert not report.actors

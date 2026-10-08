@@ -43,3 +43,36 @@ def test_lifecycle_queries_use_node_variables_and_independent_connections():
     assert "stateReason" in ISSUE_TIMELINE_QUERY
     assert "itemTypes: [MERGED_EVENT]" in PR_TIMELINE_QUERY
     assert "commit { oid }" in PR_TIMELINE_QUERY
+
+
+def test_comment_and_review_queries_paginate_one_connection_without_bodies():
+    from repo_history_tracking.queries import (
+        ISSUE_COMMENTS_QUERY,
+        PR_COMMENTS_QUERY,
+        PR_REVIEWS_QUERY,
+        PR_THREADS_QUERY,
+        THREAD_COMMENTS_QUERY,
+    )
+
+    for document in (
+        ISSUE_COMMENTS_QUERY,
+        PR_COMMENTS_QUERY,
+        PR_REVIEWS_QUERY,
+        PR_THREADS_QUERY,
+        THREAD_COMMENTS_QUERY,
+    ):
+        assert "$id: ID!" in document
+        assert "node(id: $id)" in document
+        assert "first: $first, after: $after" in document
+        assert document.count("fragment ForwardPageInfo on PageInfo") == 1
+        assert "body" not in document
+        assert "states:" not in document and "since:" not in document
+    assert "... on Issue" in ISSUE_COMMENTS_QUERY
+    assert "... on PullRequest" in PR_COMMENTS_QUERY
+    assert "submittedAt state" in PR_REVIEWS_QUERY
+    assert "isResolved isOutdated" in PR_THREADS_QUERY
+    assert "... on PullRequestReviewThread" in THREAD_COMMENTS_QUERY
+    assert "publishedAt state" in THREAD_COMMENTS_QUERY
+    assert "pullRequestReview { id }" in THREAD_COMMENTS_QUERY
+    assert "comments(first:" not in PR_REVIEWS_QUERY
+    assert "comments(first:" not in PR_THREADS_QUERY

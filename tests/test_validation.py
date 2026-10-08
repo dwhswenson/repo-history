@@ -17,6 +17,7 @@ from repo_history_tracking import (
     build_report,
     load_schema,
     report_from_json,
+    report_to_json,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -265,3 +266,21 @@ def test_semantic_review_timestamp_and_opening_author(mixed):
             mixed.actors,
             [replace(opening, credits=(Credit("U_performer", "author"),))],
         )
+
+
+def test_inline_publication_before_creation_is_valid(mixed):
+    activity = next(
+        a
+        for a in mixed.activities
+        if a.type == "pr_inline_review_comment" and not a.metadata.timestamp_fallback
+    )
+    activity = replace(
+        activity,
+        metadata=replace(
+            activity.metadata,
+            created_at=activity.metadata.published_at + timedelta(seconds=1),
+        ),
+    )
+    report = build_report(mixed.metadata, mixed.actors, [activity])
+    assert report.activities[0] == activity
+    assert report_from_json(report_to_json(report)) == report
