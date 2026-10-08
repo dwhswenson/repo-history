@@ -1,11 +1,12 @@
+"""Tests for repo_history_tracking.validation."""
+
 import json
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
-from hashlib import sha256
 from pathlib import Path
 
 import pytest
-from jsonschema import Draft202012Validator, FormatChecker
+from jsonschema import Draft202012Validator
 
 from repo_history_tracking import (
     ACTIVITY_TYPES,
@@ -14,34 +15,11 @@ from repo_history_tracking import (
     IssueOpenedMetadata,
     ReportValidationError,
     build_report,
-    git_identity_key,
     load_schema,
     report_from_json,
-    report_to_json,
-    unresolved_git_actor,
-    validate_report,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
-
-
-@pytest.mark.parametrize("name", ["mixed-2024-02.json", "empty-2024-02.json"])
-def test_fixtures_round_trip(name):
-    text = (FIXTURES / name).read_text()
-    Draft202012Validator(load_schema(), format_checker=FormatChecker()).validate(
-        json.loads(text)
-    )
-    report = report_from_json(text)
-    assert report_from_json(report_to_json(report)) == report
-    assert report_to_json(report) == text
-
-
-@pytest.mark.parametrize("kind", ACTIVITY_TYPES)
-def test_every_metadata_branch(kind, mixed):
-    activity = next(a for a in mixed.activities if a.type == kind)
-    report = build_report(mixed.metadata, mixed.actors, [activity])
-    assert report_from_json(report_to_json(report)) == report
-    assert report.summaries.repository_counts[kind] == 1
 
 
 @pytest.mark.parametrize("kind", ACTIVITY_TYPES)
@@ -50,91 +28,6 @@ def test_every_metadata_branch_rejects_wrong_fields(kind, mixed_data):
     activity["metadata"]["body"] = "must not leak"
     with pytest.raises(ReportValidationError, match="body"):
         report_from_json(json.dumps(mixed_data))
-
-
-def test_counts_and_context(mixed):
-    s = mixed.summaries
-    assert sum(s.repository_counts.values()) == 14
-    assert s.repository_counts["commit"] == 2
-    assert s.actor_counts["U_author"]["commit"] == 1
-    assert s.actor_counts["U_author"]["pr_opened"] == 1
-    assert s.actor_counts["U_author"]["pr_merged"] == 0
-    assert s.actor_counts["U_performer"]["issue_closed"] == 2
-    assert "U_context" not in s.actor_counts
-    assert s.distinct_actors.total == 5
-    assert (
-        s.distinct_actors.human,
-        s.distinct_actors.bot,
-        s.distinct_actors.unresolved_git,
-    ) == (2, 1, 2)
-    assert s.unattributed_total == 1
-    assert s.unattributed_by_type["commit"] == 0
-    assert s.distinct_actors_by_type["issue_comment"].total == 0
-
-
-def test_builder_normalizes_duplicates_and_order(mixed):
-    activities = [replace(a, credits=a.credits + a.credits) for a in mixed.activities]
-    report = build_report(mixed.metadata, reversed(mixed.actors), reversed(activities))
-    assert report == mixed
-    assert report_to_json(
-        replace(
-            mixed,
-            actors=tuple(reversed(mixed.actors)),
-            activities=tuple(reversed(mixed.activities)),
-        )
-    ) == report_to_json(mixed)
-
-
-def test_missing_credit_never_merges_unknown_people(mixed):
-    comments = [a for a in mixed.activities if a.type == "issue_comment"]
-    original = comments[0]
-    comments.append(
-        replace(
-            original,
-            id="issue_comment:IC_2",
-            metadata=replace(original.metadata, source_node_id="IC_2"),
-        )
-    )
-    result = build_report(mixed.metadata, mixed.actors, comments)
-    assert result.summaries.unattributed_total == 2
-    assert result.summaries.distinct_actors.total == 0
-    assert result.summaries.actor_counts == {}
-
-
-@pytest.mark.parametrize(
-    "email,name,kind,value",
-    [
-        (" Example@Email.org ", "ignored", "email", "example@email.org"),
-        (None, " Name Only ", "name", "Name Only"),
-        ("  ", "Name Only", "name", "Name Only"),
-    ],
-)
-def test_identity_hash(email, name, kind, value):
-    key = f"git:{kind}:{sha256(value.encode()).hexdigest()}"
-    assert git_identity_key(email, name) == key
-    actor = unresolved_git_actor(email, name)
-    assert actor.key == key
-    assert actor.git_email == email
-    assert actor.git_name == name
-    assert actor.classification == "unresolved_git"
-
-
-def test_identity_namespaces_and_missing():
-    assert git_identity_key("Same", None) != git_identity_key(None, "Same")
-    assert git_identity_key(None, "Name") != git_identity_key(None, "name")
-    assert git_identity_key("EMAIL", None) == git_identity_key("email", None)
-    assert unresolved_git_actor(" ", None) is None
-    assert git_identity_key(None, " ") is None
-    assert unresolved_git_actor(None, "tool[bot]").classification == "unresolved_git"
-
-
-def test_linked_identity_survives_login_change(mixed):
-    actors = [
-        replace(a, login="new-login") if a.key == "U_author" else a
-        for a in mixed.actors
-    ]
-    report = build_report(mixed.metadata, actors, mixed.activities)
-    assert report.summaries == mixed.summaries
 
 
 @pytest.mark.parametrize("state", [None, "DISMISSED", "FUTURE_STATE"])
@@ -239,29 +132,6 @@ def test_half_open_interval(mixed):
             )
 
 
-def test_timezone_normalization_and_precision_order(mixed):
-    event = next(a for a in mixed.activities if a.type == "issue_comment")
-    at = datetime(2024, 2, 10, 6, tzinfo=timezone(timedelta(hours=-6)))
-    first = replace(event, occurred_at=at)
-    second = replace(
-        event,
-        id="issue_comment:IC_2",
-        occurred_at=at + timedelta(microseconds=1),
-        metadata=replace(event.metadata, source_node_id="IC_2"),
-    )
-    report = build_report(mixed.metadata, mixed.actors, [second, first])
-    data = json.loads(report_to_json(report))
-    assert data["activities"][0]["occurred_at"] == "2024-02-10T12:00:00Z"
-    assert data["activities"][1]["occurred_at"] == "2024-02-10T12:00:00.000001Z"
-    with pytest.raises(ReportValidationError, match="timezone-aware"):
-        build_report(
-            mixed.metadata,
-            mixed.actors,
-            [replace(event, occurred_at=at.replace(tzinfo=None))],
-        )
-
-
-# Mutate a single field on an otherwise independently specified valid fixture.
 @pytest.mark.parametrize(
     "path,value",
     [
@@ -326,14 +196,6 @@ def test_duplicate_credits_rejected_on_read(mixed_data):
     credits.append(credits[0])
     with pytest.raises(ReportValidationError):
         report_from_json(json.dumps(mixed_data))
-
-
-@pytest.mark.parametrize(
-    "text", ["{", "[]", "null", '{"schema_version":"1","schema_version":"1"}']
-)
-def test_bad_json(text):
-    with pytest.raises(ReportValidationError):
-        report_from_json(text)
 
 
 def test_wrong_dataclass_rejected(mixed):
@@ -403,12 +265,3 @@ def test_semantic_review_timestamp_and_opening_author(mixed):
             mixed.actors,
             [replace(opening, credits=(Credit("U_performer", "author"),))],
         )
-
-
-def test_empty_and_context_only_month(empty):
-    report = build_report(
-        empty.metadata, [Actor("U_context", "human", github_node_id="U_context")], []
-    )
-    assert report.summaries == empty.summaries
-    assert all(v == 0 for v in report.summaries.repository_counts.values())
-    validate_report(report)

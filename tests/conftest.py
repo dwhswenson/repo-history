@@ -2,8 +2,12 @@ import json
 from pathlib import Path
 
 import pytest
+import requests
 
+import repo_history_tracking as api
 from repo_history_tracking import report_from_json
+
+from .helpers import Session
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -21,3 +25,14 @@ def mixed():
 @pytest.fixture
 def empty():
     return report_from_json((FIXTURES / "empty-2024-02.json").read_text())
+
+
+@pytest.fixture
+def client(monkeypatch):
+    session = Session()
+    monkeypatch.setattr(requests, "Session", lambda: session)
+    result = api.GraphQLClient(" secret-token ")
+    result._sleep = [].append
+    result._clock = lambda: 1000
+    yield result
+    result.close()

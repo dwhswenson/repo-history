@@ -1,8 +1,9 @@
 # Repository history tracking
 
-Phase 1 provides an in-memory Python contract for monthly GitHub repository activity.
-GitHub collection, authentication, report file writing, CLI, and backfill are planned
-in later phases; see [SPEC.md](SPEC.md).
+Phases 1–2 provide an in-memory monthly report contract and a synchronous GitHub
+GraphQL foundation with authentication, pagination, and repository/head lookup.
+Activity collection, report file writing, CLI, and backfill are planned in later
+phases; see [SPEC.md](SPEC.md).
 
 Requires Python 3.12+. Packaging and Pixi configuration are maintained together in
 `pyproject.toml`. Install with `pip install .`, or use the existing Pixi workspace:
@@ -14,6 +15,96 @@ pixi run -e dev lint
 pixi run -e dev format-check
 pixi run -e dev build
 ```
+
+Test suites mirror source module names with a `test_` prefix: for example,
+`tests/test_queries.py` tests
+`src/repo_history_tracking/queries.py`. Shared fixtures and response builders live
+in `tests/conftest.py` and `tests/helpers.py`; `tests/test_packaging.py` covers
+distribution integration. Pytest uses standard test filename discovery under
+`tests`, with importlib mode.
+
+## GitHub GraphQL foundation
+
+Set `GH_TOKEN` (or `GITHUB_TOKEN` as a fallback), or pass an explicit token.
+Blank environment values are ignored; an explicit blank token is an error.
+The client supports repositories on GitHub.com accessible to that credential.
+
+```python
+from repo_history_tracking import GraphQLClient, lookup_repository
+
+with GraphQLClient() as client:
+    repository = lookup_repository(client, "example", "project")
+    print(repository.repository_node_id, repository.default_branch_head)
+```
+
+The immutable `RepositorySnapshot` contains `repository_node_id`, current
+`repository_full_name` and `repository_url`, `issues_enabled`, `default_branch`,
+and `default_branch_head`. Empty repositories have null branch/head. This lookup
+captures the head for later history traversal; it does not collect activities.
+The client owns its session: use a context manager or call `close()`. It is intended
+for sequential queries and must not be shared between concurrent workers.
+
+`execute(document, variables, *, operation_name)` returns the checked GraphQL
+`data` dictionary. Supply named **query** operations, not mutations. Values remain
+in the variables payload. HTTP errors, malformed responses, and all nonempty
+GraphQL error lists prevent success, including responses carrying partial data.
+
+`iter_connection` traverses one forward `nodes` connection:
+
+```python
+query = """
+query RepositoryIssues($owner: String!, $name: String!, $first: Int!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    issues(first: $first, after: $after) {
+      nodes { id }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+}
+"""
+with GraphQLClient() as client:
+    nodes = list(
+        client.iter_connection(
+            query,
+            {"owner": "example", "name": "project"},
+            operation_name="RepositoryIssues",
+            connection_path=("repository", "issues"),
+            page_size=100,
+        )
+    )
+```
+
+Each iterator owns its cursor and effective page size, including nested traversals.
+`cursor_variable` and `page_size_variable` default to `after` and `first`; provided
+variables can contain an initial cursor. Null nodes are preserved. Every page is
+validated before yielding, but a later page can still fail: discard the entire
+incomplete collection, including previously yielded nodes. Pagination performs
+no date filtering or activity normalization.
+
+Defaults are four attempts per operation/page, 1/2/4-second retry backoff, and
+10-second connect/60-second read timeouts. Override `max_attempts` and `timeout`
+on the client. Timeouts are Requests connect/read limits, not a total run deadline.
+Connection failures and transient server errors are retried. Server query timeouts
+and recognized resource errors halve paginated page sizes at the same cursor,
+retaining the reduced size after success. Reductions share the attempt budget;
+an unrecoverable size-1 failure stops immediately.
+
+Rate limits always raise `RateLimitError` immediately without waiting or retrying.
+Its `retry_after` (seconds) and `reset_at` (aware UTC datetime) are nullable when
+GitHub provides no usable guidance. Callers must honor both before arranging a
+later run. A successful response with zero remaining budget is returned, but the
+client refuses further requests until its known reset; without one, use a fresh
+client for a later run. A rejected rate-limited request also blocks further calls
+on that client until its known reset, or requires a fresh client if unknown.
+
+All API failures inherit `GitHubAPIError`: `AuthenticationError`, `TransportError`,
+`GraphQLError`, `RateLimitError`, `PaginationError`, `RepositoryUnavailableError`,
+and `QueryResourceError` (also a `GraphQLError`). Exceptions expose applicable
+`operation`, `status`, `request_id`, `attempts`, `retry_after`, and `reset_at` fields.
+Unavailable repositories are not distinguished as missing versus inaccessible.
+Standard Python logging records retry/page-reduction information at INFO and
+response status/request-ID/budget metadata at DEBUG. The package configures no
+handlers and excludes credentials, query variables, and response bodies.
 
 ## Python API
 

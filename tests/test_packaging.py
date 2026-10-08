@@ -19,6 +19,13 @@ def test_distributions_and_isolated_wheel_install(tmp_path):
     sdist = Path(builder.build("sdist", str(output)))
     with tarfile.open(sdist) as archive:
         assert any(name.endswith("src/" + SCHEMA) for name in archive.getnames())
+        assert any(
+            name.endswith("tests/test_queries.py") for name in archive.getnames()
+        )
+        assert any(
+            name.endswith("tests/fixtures/mixed-2024-02.json")
+            for name in archive.getnames()
+        )
         archive.extractall(tmp_path / "unpacked", filter="data")
     # Build the wheel from the sdist to catch source distribution omissions.
     source = next((tmp_path / "unpacked").iterdir())
@@ -59,6 +66,14 @@ from pathlib import Path
 import repo_history_tracking as r
 assert Path(r.__file__).is_relative_to(Path(sys.prefix)), r.__file__
 assert r.load_schema()['$id'] == 'urn:repo-history-tracking:monthly-report:1'
+from repo_history_tracking.queries import REPOSITORY_QUERY, PAGE_INFO_FRAGMENT
+assert 'query RepositoryLookup' in REPOSITORY_QUERY
+assert 'endCursor' in PAGE_INFO_FRAGMENT
+for name in ('GraphQLClient', 'resolve_token', 'RepositorySnapshot',
+             'lookup_repository', 'GitHubAPIError', 'AuthenticationError',
+             'TransportError', 'GraphQLError', 'RateLimitError',
+             'PaginationError', 'RepositoryUnavailableError', 'QueryResourceError'):
+    assert getattr(r, name) is not None
 for text in json.load(sys.stdin):
     report = r.report_from_json(text)
     assert r.report_from_json(r.report_to_json(report)) == report
