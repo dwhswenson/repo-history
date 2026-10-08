@@ -69,7 +69,7 @@ assert r.load_schema()['$id'] == 'urn:repo-history-tracking:monthly-report:1'
 from repo_history_tracking.queries import REPOSITORY_QUERY, PAGE_INFO_FRAGMENT
 assert 'query RepositoryLookup' in REPOSITORY_QUERY
 assert 'endCursor' in PAGE_INFO_FRAGMENT
-for name in ('GraphQLClient', 'resolve_token', 'RepositorySnapshot',
+for name in ('collect_month', 'GraphQLClient', 'resolve_token', 'RepositorySnapshot',
              'lookup_repository', 'GitHubAPIError', 'AuthenticationError',
              'TransportError', 'GraphQLError', 'RateLimitError',
              'PaginationError', 'RepositoryUnavailableError', 'QueryResourceError'):

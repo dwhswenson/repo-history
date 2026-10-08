@@ -1,9 +1,9 @@
 # Repository history tracking
 
-Phases 1–2 provide an in-memory monthly report contract and a synchronous GitHub
-GraphQL foundation with authentication, pagination, and repository/head lookup.
-Activity collection, report file writing, CLI, and backfill are planned in later
-phases; see [SPEC.md](SPEC.md).
+Phases 1–3 provide a monthly report contract, a synchronous GitHub GraphQL
+foundation, and monthly issue/PR lifecycle collection. Comments, reviews, and
+commits are planned in later phases, as are report file writing, CLI, and
+backfill; see [SPEC.md](SPEC.md).
 
 Requires Python 3.12+. Packaging and Pixi configuration are maintained together in
 `pyproject.toml`. Install with `pip install .`, or use the existing Pixi workspace:
@@ -22,6 +22,65 @@ Test suites mirror source module names with a `test_` prefix: for example,
 in `tests/conftest.py` and `tests/helpers.py`; `tests/test_packaging.py` covers
 distribution integration. Pytest uses standard test filename discovery under
 `tests`, with importlib mode.
+
+## Monthly lifecycle collection
+
+```python
+from repo_history_tracking import collect_month, report_to_json, validate_report
+
+# Uses GH_TOKEN, falling back to GITHUB_TOKEN; token="..." is also supported.
+report = collect_month("example", "project", 2024, 2)
+validate_report(report)
+print(report.summaries.repository_counts)
+for activity in report.activities:
+    print(activity.id, activity.occurred_at, activity.credits)
+text = report_to_json(report)
+```
+
+`collect_month(owner, repo, year, month, *, token=None)` returns a validated
+`MonthlyReport` containing `issue_opened`, `issue_closed`, `issue_reopened`,
+`pr_opened`, and `pr_merged` activities. **This is a lifecycle-only report:**
+comments, reviews, and commits are not collected yet. Their zero counts do not
+establish absence of activity; this limitation is recorded in
+`metadata.coverage_limitations`. No files are written.
+
+Months use exact UTC half-open boundaries. Future months and invalid inputs are
+rejected before network requests. The ongoing flag uses collection start, even
+if the run finishes in a later month. Repository identity and the default-branch
+head are captured once before traversal, including a null head for an empty
+repository. The function owns and closes its client, including on failure.
+
+All issue/PR parent pages and relevant lifecycle timeline pages are traversed
+independently, without creation-date or current-state filters. This finds events
+on older parents but can be expensive for large repositories. Requests begin
+with 100-item pages and reuse the client's page reductions and retry policy.
+Issue collection is skipped and recorded as a limitation when issues are
+disabled; PR collection still runs. The collector performs no persistent caching.
+
+Openings credit the subject author. Closures, reopenings, and merges credit the
+event performer, retaining the subject author only as context. Every distinct
+closure/reopening counts separately; closure reasons come from the individual
+event, never the issue's current reason. Missing performers and reasons remain
+null. Reopening activities have null event URLs because their source event does
+not expose a URL. A merge's commit SHA is context and does not count as commit
+activity. Draft PR openings are included.
+
+Actor identities use GitHub node IDs, with `User` classified as human and `Bot`
+as bot. Unsupported actor types fail explicitly. Only actors referenced by
+retained activities enter the registry; repeated observations refresh available
+display metadata. Identical duplicate activities count once; conflicting records
+sharing an event ID fail. Malformed source objects, null parent/event nodes,
+pagination failures, and API failures raise without returning a partial report.
+Report contract failures raise `ReportValidationError`.
+
+The offline acceptance history is in `tests/test_collection.py`, particularly
+`test_multi_month_history`. It checks explicit event IDs, attribution, counts,
+independent parent/timeline cursors, reruns, and collection of a different month
+from the same source history. Run it with:
+
+```text
+pixi run -e dev test tests/test_collection.py
+```
 
 ## GitHub GraphQL foundation
 

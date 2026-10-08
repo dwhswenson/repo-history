@@ -34,3 +34,137 @@ query RepositoryLookup($owner: String!, $name: String!) {
 }
 """
 )
+
+ACTOR_FRAGMENT = """
+fragment LifecycleActor on Actor {
+  __typename
+  login
+  url
+  ... on User { id databaseId name }
+  ... on Bot { id databaseId }
+}
+"""
+
+ISSUE_SUBJECT_FRAGMENT = """
+fragment LifecycleIssue on Issue {
+  id
+  number
+  title
+  url
+  createdAt
+  author { ...LifecycleActor }
+}
+"""
+
+PR_SUBJECT_FRAGMENT = """
+fragment LifecyclePullRequest on PullRequest {
+  id
+  number
+  title
+  url
+  createdAt
+  author { ...LifecycleActor }
+}
+"""
+
+ISSUES_QUERY = (
+    ACTOR_FRAGMENT
+    + ISSUE_SUBJECT_FRAGMENT
+    + PAGE_INFO_FRAGMENT
+    + """
+query RepositoryIssues($id: ID!, $first: Int!, $after: String) {
+  node(id: $id) {
+    ... on Repository {
+      issues(first: $first, after: $after) {
+        nodes { ...LifecycleIssue }
+        pageInfo { ...ForwardPageInfo }
+      }
+    }
+  }
+}
+"""
+)
+
+PULL_REQUESTS_QUERY = (
+    ACTOR_FRAGMENT
+    + PR_SUBJECT_FRAGMENT
+    + PAGE_INFO_FRAGMENT
+    + """
+query RepositoryPullRequests($id: ID!, $first: Int!, $after: String) {
+  node(id: $id) {
+    ... on Repository {
+      pullRequests(first: $first, after: $after) {
+        nodes { ...LifecyclePullRequest }
+        pageInfo { ...ForwardPageInfo }
+      }
+    }
+  }
+}
+"""
+)
+
+ISSUE_EVENTS_FRAGMENT = """
+fragment LifecycleClosure on ClosedEvent {
+  id
+  createdAt
+  url
+  stateReason
+  actor { ...LifecycleActor }
+}
+fragment LifecycleReopening on ReopenedEvent {
+  id
+  createdAt
+  actor { ...LifecycleActor }
+}
+"""
+
+ISSUE_TIMELINE_QUERY = (
+    ACTOR_FRAGMENT
+    + ISSUE_EVENTS_FRAGMENT
+    + PAGE_INFO_FRAGMENT
+    + """
+query IssueLifecycle($id: ID!, $first: Int!, $after: String) {
+  node(id: $id) {
+    ... on Issue {
+      timelineItems(first: $first, after: $after,
+                    itemTypes: [CLOSED_EVENT, REOPENED_EVENT]) {
+        nodes {
+          __typename
+          ...LifecycleClosure
+          ...LifecycleReopening
+        }
+        pageInfo { ...ForwardPageInfo }
+      }
+    }
+  }
+}
+"""
+)
+
+MERGE_EVENT_FRAGMENT = """
+fragment LifecycleMerge on MergedEvent {
+  id
+  createdAt
+  url
+  actor { ...LifecycleActor }
+  commit { oid }
+}
+"""
+
+PR_TIMELINE_QUERY = (
+    ACTOR_FRAGMENT
+    + MERGE_EVENT_FRAGMENT
+    + PAGE_INFO_FRAGMENT
+    + """
+query PullRequestLifecycle($id: ID!, $first: Int!, $after: String) {
+  node(id: $id) {
+    ... on PullRequest {
+      timelineItems(first: $first, after: $after, itemTypes: [MERGED_EVENT]) {
+        nodes { __typename ...LifecycleMerge }
+        pageInfo { ...ForwardPageInfo }
+      }
+    }
+  }
+}
+"""
+)
