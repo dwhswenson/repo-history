@@ -1,9 +1,10 @@
-"""Checked synchronous GraphQL queries with one bounded retry budget."""
+"""Checked synchronous GitHub requests with bounded retries and separate budgets."""
 
 import logging
 import math
 import time
 from collections.abc import Iterator, Mapping
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
@@ -21,6 +22,19 @@ from .errors import (
 
 LOG = logging.getLogger(__name__)
 ENDPOINT = "https://api.github.com/graphql"
+
+
+@dataclass
+class _APIUsage:
+    """Primary-budget points measured during this client lifetime."""
+
+    points: int = 0
+    unmeasured_attempts: int = 0
+
+    def record(self, cost):
+        if type(cost) is int and cost >= 0:
+            self.points += cost
+            self.unmeasured_attempts -= 1
 
 
 class _BearerAuth(requests.auth.AuthBase):
@@ -126,9 +140,8 @@ class GraphQLClient:
         self._sleep = time.sleep
         self._clock = time.time
         self._closed = False
-        self._exhausted = False
-        self._budget_reset = None
-        self._retry_at = None
+        self._blocked = {}
+        self._api_usage = {"rest": _APIUsage(), "graphql": _APIUsage()}
 
     def close(self) -> None:
         if not self._closed:
@@ -190,25 +203,10 @@ class GraphQLClient:
             raise ValueError("variables must be a mapping")
         values = dict(variables)
         for attempt in range(1, self.max_attempts + 1):
-            if self._exhausted:
-                if (
-                    self._budget_reset is None
-                    or self._clock() < self._budget_reset.timestamp()
-                    or (self._retry_at is not None and self._clock() < self._retry_at)
-                ):
-                    raise RateLimitError(
-                        "GitHub rate budget exhausted",
-                        operation=operation_name,
-                        reset_at=self._budget_reset,
-                        retry_after=(
-                            max(0, self._retry_at - self._clock())
-                            if self._retry_at is not None
-                            else None
-                        ),
-                    )
-                self._exhausted = False
+            self._check_budget("graphql", operation_name)
             diagnostic = dict(operation=operation_name, attempts=attempt)
             resource_failure = False
+            self._api_usage["graphql"].unmeasured_attempts += 1
             try:
                 response = self._session.post(
                     ENDPOINT,
@@ -241,6 +239,7 @@ class GraphQLClient:
                     data = body.get("data") if isinstance(body, dict) else None
                     rate = data.get("rateLimit") if isinstance(data, dict) else None
                     rate = rate if isinstance(rate, dict) else {}
+                    self._api_usage["graphql"].record(rate.get("cost"))
                     remaining = _number(
                         headers.get("x-ratelimit-remaining", rate.get("remaining"))
                     )
@@ -288,14 +287,16 @@ class GraphQLClient:
                         status,
                         diagnostic["request_id"],
                         remaining,
-                        reset,
+                        reset.astimezone() if reset is not None else None,
                         retry,
                     )
                     if limited:
-                        self._exhausted = True
-                        self._budget_reset = reset
-                        self._retry_at = (
-                            self._clock() + retry if retry is not None else None
+                        self._record_limit(
+                            "graphql",
+                            remaining,
+                            reset,
+                            retry,
+                            secondary=any("secondary" in m for m in messages),
                         )
                         raise RateLimitError(
                             "GitHub rate limit reached",
@@ -379,9 +380,7 @@ class GraphQLClient:
                                     "missing or malformed GraphQL data", **diagnostic
                                 )
                             if remaining == 0:
-                                self._exhausted = True
-                                self._budget_reset = reset
-                                self._retry_at = None
+                                self._blocked["graphql"] = (reset, None)
                             return data, values.get(page_size_variable)
                 finally:
                     response.close()
@@ -400,6 +399,140 @@ class GraphQLClient:
                 raise failure
             LOG.info(
                 "GitHub operation=%s retry_after=%s attempt=%s",
+                operation_name,
+                2 ** (attempt - 1),
+                attempt,
+            )
+            self._sleep(2 ** (attempt - 1))
+        raise AssertionError("unreachable")
+
+    def _check_budget(self, resource, operation):
+        for key in ("secondary", resource):
+            if key not in self._blocked:
+                continue
+            reset, retry_at = self._blocked[key]
+            now = self._clock()
+            unknown = reset is None and (key != "secondary" or retry_at is None)
+            if (
+                unknown
+                or (reset is not None and now < reset.timestamp())
+                or (retry_at is not None and now < retry_at)
+            ):
+                raise RateLimitError(
+                    "GitHub rate budget exhausted",
+                    operation=operation,
+                    reset_at=reset,
+                    retry_after=max(0, retry_at - now)
+                    if retry_at is not None
+                    else None,
+                )
+            del self._blocked[key]
+
+    def _record_limit(self, resource, remaining, reset, retry, *, secondary=False):
+        retry_at = self._clock() + retry if retry is not None else None
+        if remaining == 0:
+            self._blocked[resource] = (reset, retry_at)
+        if secondary or retry is not None or remaining != 0:
+            self._blocked["secondary"] = (reset, retry_at)
+
+    def _get_rest_list(self, url, *, operation_name):
+        """Fetch one checked REST page; URL safety is enforced by the paginator."""
+        if self._closed:
+            raise TransportError("client is closed", operation=operation_name)
+        for attempt in range(1, self.max_attempts + 1):
+            self._check_budget("rest", operation_name)
+            diagnostic = dict(operation=operation_name, attempts=attempt)
+            self._api_usage["rest"].unmeasured_attempts += 1
+            try:
+                response = self._session.get(
+                    url,
+                    headers={"X-GitHub-Api-Version": "2026-03-10"},
+                    timeout=self.timeout,
+                    allow_redirects=False,
+                )
+            except requests.exceptions.SSLError:
+                raise TransportError("TLS verification failed", **diagnostic) from None
+            except (requests.Timeout, requests.ConnectionError):
+                failure = TransportError("network request failed", **diagnostic)
+            except requests.RequestException:
+                raise TransportError("request failed", **diagnostic) from None
+            else:
+                try:
+                    headers = {k.lower(): v for k, v in response.headers.items()}
+                    status = response.status_code
+                    if status == 200:
+                        self._api_usage["rest"].record(1)
+                    diagnostic.update(
+                        status=status, request_id=headers.get("x-github-request-id")
+                    )
+                    try:
+                        body = response.json()
+                    except ValueError:
+                        body = None
+                    message = body.get("message", "") if isinstance(body, dict) else ""
+                    message = message.lower() if isinstance(message, str) else ""
+                    remaining = _number(headers.get("x-ratelimit-remaining"))
+                    reset = _reset(headers.get("x-ratelimit-reset"))
+                    retry = _retry_after(headers.get("retry-after"), self._clock())
+                    limited = status == 429 or (
+                        status == 403
+                        and (
+                            remaining == 0
+                            or "retry-after" in headers
+                            or "rate limit" in message
+                            or "rate-limit" in message
+                        )
+                    )
+                    LOG.debug(
+                        "GitHub REST operation=%s attempt=%s status=%s request_id=%s remaining=%s reset=%s retry_after=%s",
+                        operation_name,
+                        attempt,
+                        status,
+                        diagnostic["request_id"],
+                        remaining,
+                        reset.astimezone() if reset is not None else None,
+                        retry,
+                    )
+                    if limited:
+                        self._record_limit(
+                            "rest",
+                            remaining,
+                            reset,
+                            retry,
+                            secondary="secondary" in message,
+                        )
+                        raise RateLimitError(
+                            "GitHub rate limit reached",
+                            retry_after=retry,
+                            reset_at=reset,
+                            **diagnostic,
+                        )
+                    if status in (401, 403):
+                        raise AuthenticationError(
+                            "GitHub authentication or permission denied", **diagnostic
+                        )
+                    if status in (500, 502, 503, 504):
+                        failure = TransportError(
+                            "GitHub server request failed", **diagnostic
+                        )
+                    elif status != 200:
+                        raise TransportError("GitHub HTTP request failed", **diagnostic)
+                    else:
+                        if not isinstance(body, list) or any(
+                            not isinstance(item, dict) for item in body
+                        ):
+                            raise TransportError(
+                                "malformed REST list response", **diagnostic
+                            )
+                        if remaining == 0:
+                            self._blocked["rest"] = (reset, None)
+                        return body, headers.get("link")
+                finally:
+                    response.close()
+            if attempt == self.max_attempts:
+                raise failure
+            LOG.info(
+                "GitHub REST operation=%s retry_after=%s attempt=%s",
                 operation_name,
                 2 ** (attempt - 1),
                 attempt,

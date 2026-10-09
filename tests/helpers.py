@@ -37,6 +37,9 @@ class Session:
             raise response
         return response
 
+    def get(self, endpoint, **kwargs):
+        return self.post(endpoint, **kwargs)
+
     def close(self):
         self.closed = True
 

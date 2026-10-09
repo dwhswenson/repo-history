@@ -37,8 +37,8 @@ for activity in report.activities:
 text = report_to_json(report)
 ```
 
-`collect_month(owner, repo, year, month, *, token=None)` returns a validated
-`MonthlyReport` containing `issue_opened`, `issue_closed`, `issue_reopened`,
+`collect_month(owner, repo, year, month, *, token=None, discovery="full")` returns
+a validated `MonthlyReport` containing `issue_opened`, `issue_closed`, `issue_reopened`,
 `pr_opened`, `pr_merged`, `issue_comment`, `pr_conversation_comment`,
 `pr_review`, and `pr_inline_review_comment` activities. Commits are not collected
 yet; zero commit counts do not establish absence of activity. This limitation is
@@ -51,13 +51,52 @@ if the run finishes in a later month. Repository identity and the default-branch
 head are captured once before traversal, including a null head for an empty
 repository. The function owns and closes its client, including on failure.
 
-All issue/PR parent pages, lifecycle timelines, conversation comments, reviews,
-review threads, and thread comments are traversed independently, without
+By default (`discovery="full"`), all issue/PR parent pages, lifecycle timelines,
+conversation comments, reviews, review threads, and thread comments are traversed independently, without
 creation-date or current-state filters. This finds events on older parents but
 can be expensive for large repositories. Requests begin
 with 100-item pages and reuse the client's page reductions and retry policy.
 Issue collection is skipped and recorded as a limitation when issues are
 disabled; PR collection still runs. The collector performs no persistent caching.
+
+### Experimental bounded parent discovery
+
+```python
+report = collect_month("example", "project", 2024, 2, discovery="bounded")
+```
+
+`discovery="bounded"` uses the REST repository issues endpoint to discover both
+issues and PRs in all states, using the resolved current repository name. It
+requests updates since one second before month start, follows every next-page
+link, deduplicates item numbers, and retains parents with `updated_at >= start`
+and `created_at < end`. Updates after month end remain eligible. Candidate
+subjects and authors are hydrated through GraphQL in batches of up to 50 before
+the same nested collectors retrieve their activities. REST PR issue IDs are
+never used as GraphQL PullRequest IDs. REST uses API version `2026-03-10`.
+
+**Bounded discovery is experimental.** It has not been established that every
+counted activity advances its parent's REST update timestamp. A stale parent
+update timestamp can therefore omit activity. Keep full traversal for reference
+and audits; selecting bounded discovery does not establish report completeness.
+Only offline fixtures have been verified, including the disabled-issues case;
+live REST behavior when issues are disabled remains unverified. When issues are
+disabled, bounded discovery still requests REST parents and collects PRs, while
+skipping issue activity. Endpoint errors fail the run rather than yielding an
+empty report. Fine-grained credentials need the REST endpoint's **Issues: read**
+permission for private repositories in addition to the permissions required by
+GraphQL collection. See [repository issues endpoint permissions](https://docs.github.com/en/rest/issues/issues#list-repository-issues).
+
+Bounded mode validates the retrieved discovery records and retained parents'
+histories; it cannot detect malformed unrelated history on excluded parents.
+The report schema and activity rules are unchanged. Unknown discovery modes
+raise `ValueError` before requests. A failure never switches strategies or
+returns a partial report. For January of year 1 only, bounded mode selects full
+traversal before discovery to avoid overlap underflow and logs that selection.
+The selected strategy is logged at INFO rather than added to report metadata.
+Instrumentation, comparison tooling, live verification, and default rollout are
+separate follow-on work described in `PERFORMANCE.md`.
+
+### Activity normalization
 
 Openings credit the subject author. Closures, reopenings, and merges credit the
 event performer, retaining the subject author only as context. Every distinct
@@ -173,15 +212,26 @@ Rate limits always raise `RateLimitError` immediately without waiting or retryin
 Its `retry_after` (seconds) and `reset_at` (aware UTC datetime) are nullable when
 GitHub provides no usable guidance. Callers must honor both before arranging a
 later run. A successful response with zero remaining budget is returned, but the
-client refuses further requests until its known reset; without one, use a fresh
-client for a later run. A rejected rate-limited request also blocks further calls
-on that client until its known reset, or requires a fresh client if unknown.
+client refuses further requests against that API budget until its known reset;
+without one, use a fresh client for a later run. REST and GraphQL primary budgets
+are tracked separately. Secondary throttling blocks both APIs until all available
+reset/retry guidance has elapsed; without either, use a fresh client for a later
+run. Rate-limit errors never trigger an automatic strategy fallback.
 
 All API failures inherit `GitHubAPIError`: `AuthenticationError`, `TransportError`,
 `GraphQLError`, `RateLimitError`, `PaginationError`, `RepositoryUnavailableError`,
 and `QueryResourceError` (also a `GraphQLError`). Exceptions expose applicable
 `operation`, `status`, `request_id`, `attempts`, `retry_after`, and `reset_at` fields.
 Unavailable repositories are not distinguished as missing versus inaccessible.
+Each `collect_month` run logs a final INFO usage summary on success or failure,
+with separate REST and GraphQL primary-budget point totals. REST counts successful
+HTTP 200 requests (one primary-budget request each); GraphQL sums the reported
+`rateLimit.cost` from every response, including retries and hydration. Attempts
+without a measurable cost (such as network failures or GraphQL errors without
+cost data) are reported as `unmeasured_attempts`; when nonzero, the point total is
+incomplete. Account-wide cumulative usage and secondary-limit points are not
+included. Usage is logged only and does not change the report schema.
+
 Standard Python logging records retry/page-reduction information at INFO and
 response status/request-ID/budget metadata at DEBUG. The package configures no
 handlers and excludes credentials, query variables, and response bodies.

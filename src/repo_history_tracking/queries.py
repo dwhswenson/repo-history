@@ -28,6 +28,7 @@ REPOSITORY_QUERY = (
     REPOSITORY_FRAGMENT
     + """
 query RepositoryLookup($owner: String!, $name: String!) {
+  rateLimit { cost }
   repository(owner: $owner, name: $name) {
     ...RepositoryIdentity
   }
@@ -73,6 +74,7 @@ ISSUES_QUERY = (
     + PAGE_INFO_FRAGMENT
     + """
 query RepositoryIssues($id: ID!, $first: Int!, $after: String) {
+  rateLimit { cost }
   node(id: $id) {
     ... on Repository {
       issues(first: $first, after: $after) {
@@ -91,6 +93,7 @@ PULL_REQUESTS_QUERY = (
     + PAGE_INFO_FRAGMENT
     + """
 query RepositoryPullRequests($id: ID!, $first: Int!, $after: String) {
+  rateLimit { cost }
   node(id: $id) {
     ... on Repository {
       pullRequests(first: $first, after: $after) {
@@ -124,6 +127,7 @@ ISSUE_TIMELINE_QUERY = (
     + PAGE_INFO_FRAGMENT
     + """
 query IssueLifecycle($id: ID!, $first: Int!, $after: String) {
+  rateLimit { cost }
   node(id: $id) {
     ... on Issue {
       timelineItems(first: $first, after: $after,
@@ -157,6 +161,7 @@ PR_TIMELINE_QUERY = (
     + PAGE_INFO_FRAGMENT
     + """
 query PullRequestLifecycle($id: ID!, $first: Int!, $after: String) {
+  rateLimit { cost }
   node(id: $id) {
     ... on PullRequest {
       timelineItems(first: $first, after: $after, itemTypes: [MERGED_EVENT]) {
@@ -186,6 +191,7 @@ def _connection_query(operation, parent_type, field, fields, fragments=""):
         + PAGE_INFO_FRAGMENT
         + f"""
 query {operation}($id: ID!, $first: Int!, $after: String) {{
+  rateLimit {{ cost }}
   node(id: $id) {{
     ... on {parent_type} {{
       {field}(first: $first, after: $after) {{
@@ -234,3 +240,33 @@ THREAD_COMMENTS_QUERY = _connection_query(
     "pullRequestReview { id }",
     ACTOR_FRAGMENT,
 )
+
+
+def parent_hydration_query(count: int) -> str:
+    """Build aliases from batch positions; repository and item values stay variables."""
+    if type(count) is not int or not 1 <= count <= 50:
+        raise ValueError("hydration batch size must be between 1 and 50")
+    declarations = ", ".join(f"$number{i}: Int!" for i in range(count))
+    fields = "\n".join(
+        f"""parent{i}: issueOrPullRequest(number: $number{i}) {{
+          __typename
+          ...LifecycleIssue
+          ...LifecyclePullRequest
+        }}"""
+        for i in range(count)
+    )
+    return (
+        ACTOR_FRAGMENT
+        + ISSUE_SUBJECT_FRAGMENT
+        + PR_SUBJECT_FRAGMENT
+        + f"""
+query HydrateRepositoryParents($id: ID!, {declarations}) {{
+  rateLimit {{ cost }}
+  node(id: $id) {{
+    ... on Repository {{
+      {fields}
+    }}
+  }}
+}}
+"""
+    )

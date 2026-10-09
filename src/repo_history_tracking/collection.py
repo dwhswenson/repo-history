@@ -1,9 +1,11 @@
 """Synchronous monthly lifecycle, comment, and review collection; no report files are written."""
 
+import logging
 import re
 from dataclasses import replace
 from datetime import datetime, timezone
 
+from .discovery import discover_parents
 from .errors import GraphQLError
 from .models import (
     Activity,
@@ -25,17 +27,17 @@ from .models import (
 from .queries import (
     ISSUE_COMMENTS_QUERY,
     ISSUE_TIMELINE_QUERY,
-    ISSUES_QUERY,
     PR_COMMENTS_QUERY,
     PR_REVIEWS_QUERY,
     PR_THREADS_QUERY,
     PR_TIMELINE_QUERY,
-    PULL_REQUESTS_QUERY,
     THREAD_COMMENTS_QUERY,
 )
 from .reports import build_report
 from .repository import lookup_repository
 from .transport import GraphQLClient
+
+LOG = logging.getLogger(__name__)
 
 COVERAGE_LIMITATIONS = (
     "Commits are not collected; zero commit counts do not establish absence of activity.",
@@ -67,7 +69,13 @@ def _month_bounds(year: int, month: int) -> tuple[datetime, datetime]:
 
 
 def collect_month(
-    owner: str, repo: str, year: int, month: int, *, token: str | None = None
+    owner: str,
+    repo: str,
+    year: int,
+    month: int,
+    *,
+    token: str | None = None,
+    discovery: str = "full",
 ) -> MonthlyReport:
     """Return a validated lifecycle, comment, and review report for one UTC calendar month.
 
@@ -75,15 +83,35 @@ def collect_month(
     coverage limitations before interpreting zero counts. A failed traversal
     raises without returning a partial report. Authentication falls back to
     GH_TOKEN, then GITHUB_TOKEN. The client is always closed on exit.
+    Discovery defaults to full traversal. The opt-in bounded strategy is
+    experimental: completeness of parent update timestamps is unverified.
     """
     if any(not isinstance(value, str) or not value.strip() for value in (owner, repo)):
         raise ValueError("owner and repo must be nonempty strings")
+    if discovery not in ("full", "bounded"):
+        raise ValueError("discovery must be full or bounded")
     start, end = _month_bounds(year, month)
     started = _utc_now()
     if start > started:
         raise ValueError("future month")
     with GraphQLClient(token) as client:
-        return _collect_month(client, owner, repo, start, end, started)
+        completed = False
+        try:
+            report = _collect_month(client, owner, repo, start, end, started, discovery)
+            completed = True
+            return report
+        finally:
+            rest = client._api_usage["rest"]
+            graphql = client._api_usage["graphql"]
+            LOG.info(
+                "GitHub API usage status=%s REST points=%s unmeasured_attempts=%s "
+                "GraphQL points=%s unmeasured_attempts=%s",
+                "completed" if completed else "failed",
+                rest.points,
+                rest.unmeasured_attempts,
+                graphql.points,
+                graphql.unmeasured_attempts,
+            )
 
 
 def _object(value, operation: str) -> dict:
@@ -192,46 +220,36 @@ class _Records:
             self.actors[actor.key] = actor
 
 
-def _collect_parents(client, repository_id, start, end, records, *, issues):
-    operation = "RepositoryIssues" if issues else "RepositoryPullRequests"
-    parents = client.iter_connection(
-        ISSUES_QUERY if issues else PULL_REQUESTS_QUERY,
-        {"id": repository_id},
-        operation_name=operation,
-        connection_path=("node", "issues" if issues else "pullRequests"),
-    )
-    for value in parents:
-        parent = _object(value, operation)
-        author = _actor(_field(parent, "author", operation), operation)
-        subject = _subject(
-            parent, "issue" if issues else "pull_request", author, operation
+def _collect_parent(client, value, operation, start, end, records, *, issues):
+    parent = _object(value, operation)
+    author = _actor(_field(parent, "author", operation), operation)
+    subject = _subject(parent, "issue" if issues else "pull_request", author, operation)
+    created = _timestamp(parent, operation)
+    if start <= created < end:
+        kind = "issue_opened" if issues else "pr_opened"
+        details = (
+            IssueOpenedMetadata(subject.node_id)
+            if issues
+            else PROpenedMetadata(subject.node_id)
         )
-        created = _timestamp(parent, operation)
-        if start <= created < end:
-            kind = "issue_opened" if issues else "pr_opened"
-            details = (
-                IssueOpenedMetadata(subject.node_id)
-                if issues
-                else PROpenedMetadata(subject.node_id)
-            )
-            records.add(
-                Activity(
-                    f"{kind}:{subject.node_id}",
-                    kind,
-                    created,
-                    subject.url,
-                    subject,
-                    (Credit(subject.author_key, "author"),),
-                    details,
-                ),
-                (author,),
-                operation,
-            )
-        _collect_timeline(client, subject, author, start, end, records, issues=issues)
-        _collect_comments(client, subject, author, start, end, records, issues=issues)
-        if not issues:
-            _collect_reviews(client, subject, author, start, end, records)
-            _collect_threads(client, subject, author, start, end, records)
+        records.add(
+            Activity(
+                f"{kind}:{subject.node_id}",
+                kind,
+                created,
+                subject.url,
+                subject,
+                (Credit(subject.author_key, "author"),),
+                details,
+            ),
+            (author,),
+            operation,
+        )
+    _collect_timeline(client, subject, author, start, end, records, issues=issues)
+    _collect_comments(client, subject, author, start, end, records, issues=issues)
+    if not issues:
+        _collect_reviews(client, subject, author, start, end, records)
+        _collect_threads(client, subject, author, start, end, records)
 
 
 def _collect_timeline(client, subject, author, start, end, records, *, issues):
@@ -460,16 +478,15 @@ def _collect_inline_comments(
         )
 
 
-def _collect_month(client, owner, repo, start, end, started) -> MonthlyReport:
+def _collect_month(
+    client, owner, repo, start, end, started, discovery="full"
+) -> MonthlyReport:
     repository = lookup_repository(client, owner, repo)
     records = _Records()
-    if repository.issues_enabled:
-        _collect_parents(
-            client, repository.repository_node_id, start, end, records, issues=True
-        )
-    _collect_parents(
-        client, repository.repository_node_id, start, end, records, issues=False
-    )
+    for issues, parent, operation in discover_parents(
+        client, repository, start, end, strategy=discovery
+    ):
+        _collect_parent(client, parent, operation, start, end, records, issues=issues)
     limitations = COVERAGE_LIMITATIONS
     if not repository.issues_enabled:
         limitations += ("Issues are disabled; the issue connection was not collected.",)

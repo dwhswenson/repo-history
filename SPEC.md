@@ -5,7 +5,7 @@
 Build a Python library and CLI whose primary operation collects **one month of activity for one repository** and writes `YYYY-MM.json`.
 
 ```python
-collect_month(owner, repo, year, month, *, token) -> MonthlyReport
+collect_month(owner, repo, year, month, *, token=None, discovery="full") -> MonthlyReport
 ```
 
 ```text
@@ -68,7 +68,8 @@ Supplement schema validation with checks that actor references resolve, event ID
 
 - A monthly run collects and writes only the requested month. It may inspect older parent objects to find that month's activity; it must not generate earlier reports or require earlier outputs.
 - Do not select parent issues or PRs solely by creation month or current state. An old, closed PR can receive a new comment or review; an old issue can close or reopen in the requested month.
-- Use repository connections directly, GraphQL variables, and reusable fragments. Independently paginate parents and nested timelines, comments, reviews, review threads, and commit authors. Detect missing or repeated cursors. [Pagination documentation](https://docs.github.com/en/graphql/guides/using-pagination-in-the-graphql-api)
+- Full traversal (`discovery="full"`) remains the default and reference behavior. Use repository connections directly, GraphQL variables, and reusable fragments. Independently paginate parents and nested timelines, comments, reviews, review threads, and commit authors. Detect missing or repeated cursors. [Pagination documentation](https://docs.github.com/en/graphql/guides/using-pagination-in-the-graphql-api)
+- Experimental `discovery="bounded"` may use REST repository issues with all states and an overlapping update-time `since`, local `updated_at >= start` / `created_at < end` selection, and GraphQL hydration by repository identity and item number. Preserve all nested activity rules and the report schema. Completeness of REST parent update timestamps, including live discovery with issues disabled, remains unverified; do not promote this mode to the default without the acceptance work in PERFORMANCE.md. Excluded parent histories are outside bounded mode's validation scope. Failures never silently switch strategies; January of year 1 selects full traversal before discovery because the overlap would underflow.
 - Enforce exact month boundaries locally after retrieval. Apply API date filters only where their semantics are verified; do not stop commit traversal simply because one encountered commit has an old date.
 - Capture the default-branch head before traversing commits. Use that SHA as the history root. Broad parent or history traversal may be necessary for correctness even though the result is monthly.
 - Read authentication from `GH_TOKEN`, falling back to `GITHUB_TOKEN`. Support GitHub.com repositories accessible to the credential.
