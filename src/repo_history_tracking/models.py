@@ -54,6 +54,7 @@ class ReportMetadata:
     default_branch: str | None
     default_branch_head: str | None
     coverage_limitations: tuple[str, ...] = ()
+    commit_history: Literal["bounded", "full"] | None = None
 
 
 @dataclass(frozen=True)

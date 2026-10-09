@@ -29,6 +29,11 @@ def to_data(value: Any, path: str = "$") -> Any:
         return {
             f.name: to_data(getattr(value, f.name), f"{path}.{f.name}")
             for f in fields(value)
+            if not (
+                isinstance(value, ReportMetadata)
+                and f.name == "commit_history"
+                and getattr(value, f.name) is None
+            )
         }
     if isinstance(value, dict):
         return {key: to_data(item, f"{path}.{key}") for key, item in value.items()}

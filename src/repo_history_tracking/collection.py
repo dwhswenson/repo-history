@@ -1,4 +1,4 @@
-"""Synchronous monthly lifecycle, comment, and review collection; no report files are written."""
+"""Synchronous monthly GitHub activity collection; no report files are written."""
 
 import logging
 import re
@@ -40,7 +40,11 @@ from .transport import GraphQLClient
 LOG = logging.getLogger(__name__)
 
 COVERAGE_LIMITATIONS = (
-    "Commits are not collected; zero commit counts do not establish absence of activity.",
+    "Unlinked Git identities are estimates based on email or name; account "
+    "matches and bot status are not inferred.",
+    "Commit dates do not establish when commits reached the default branch. "
+    "Removed commits, force-pushes, rebases, and default-branch changes can "
+    "revise historical results.",
     "Deleted or inaccessible items and transferred issues can limit historical "
     "reconstruction.",
     "Repository and actor names, subject titles, and URLs reflect collection-time "
@@ -77,10 +81,10 @@ def collect_month(
     token: str | None = None,
     discovery: str = "full",
 ) -> MonthlyReport:
-    """Return a validated lifecycle, comment, and review report for one UTC calendar month.
+    """Return a validated activity report for one UTC calendar month.
 
-    Commits are not yet collected. See the report's
-    coverage limitations before interpreting zero counts. A failed traversal
+    Commits use a 24-hour buffered history query in either discovery mode.
+    See coverage limitations before interpreting counts. A failed traversal
     raises without returning a partial report. Authentication falls back to
     GH_TOKEN, then GITHUB_TOKEN. The client is always closed on exit.
     Discovery defaults to full traversal. The opt-in bounded strategy is
@@ -481,6 +485,8 @@ def _collect_inline_comments(
 def _collect_month(
     client, owner, repo, start, end, started, discovery="full"
 ) -> MonthlyReport:
+    from .commits import BOUNDED_LIMITATION, collect_commits
+
     repository = lookup_repository(client, owner, repo)
     records = _Records()
     for issues, parent, operation in discover_parents(
@@ -488,6 +494,9 @@ def _collect_month(
     ):
         _collect_parent(client, parent, operation, start, end, records, issues=issues)
     limitations = COVERAGE_LIMITATIONS
+    strategy = collect_commits(client, repository, start, end, records)
+    if strategy == "bounded":
+        limitations += (BOUNDED_LIMITATION,)
     if not repository.issues_enabled:
         limitations += ("Issues are disabled; the issue connection was not collected.",)
     metadata = ReportMetadata(
@@ -503,5 +512,6 @@ def _collect_month(
         default_branch=repository.default_branch,
         default_branch_head=repository.default_branch_head,
         coverage_limitations=limitations,
+        commit_history=strategy,
     )
     return build_report(metadata, records.actors.values(), records.activities.values())

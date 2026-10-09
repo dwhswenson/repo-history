@@ -9,9 +9,14 @@ import repo_history_tracking as api
 from repo_history_tracking import collection
 from repo_history_tracking.queries import parent_hydration_query
 
-from .helpers import Response, Session, errors, repository
+from .helpers import Response, Session, empty_commits, errors, repository
 from .test_collection import NOW, connection, parent
 from .test_discovery import hydrated, rest_parent
+
+
+@pytest.fixture(autouse=True)
+def isolate_commits(monkeypatch):
+    monkeypatch.setattr("repo_history_tracking.commits.collect_commits", empty_commits)
 
 
 def cost(response, points):
@@ -143,5 +148,5 @@ def test_collector_queries_all_request_primary_cost():
         getattr(queries, name) for name in dir(queries) if name.endswith("_QUERY")
     ]
     documents.append(parent_hydration_query(50))
-    assert len(documents) == 11
+    assert len(documents) == 15
     assert all(document.count("rateLimit { cost }") == 1 for document in documents)

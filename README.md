@@ -1,8 +1,8 @@
 # Repository history tracking
 
-Phases 1–4 provide a monthly report contract, a synchronous GitHub GraphQL
-foundation, and monthly issue/PR lifecycle, comment, and review collection.
-Commits, report file writing, CLI, and backfill are planned in later phases;
+Phases 1–5 provide a monthly report contract, a synchronous GitHub GraphQL
+foundation, and monthly commit, issue/PR lifecycle, comment, and review collection.
+Report file writing, CLI, and backfill are planned in later phases;
 see [SPEC.md](SPEC.md).
 
 Requires Python 3.12+. Packaging and Pixi configuration are maintained together in
@@ -40,10 +40,9 @@ text = report_to_json(report)
 `collect_month(owner, repo, year, month, *, token=None, discovery="full")` returns
 a validated `MonthlyReport` containing `issue_opened`, `issue_closed`, `issue_reopened`,
 `pr_opened`, `pr_merged`, `issue_comment`, `pr_conversation_comment`,
-`pr_review`, and `pr_inline_review_comment` activities. Commits are not collected
-yet; zero commit counts do not establish absence of activity. This limitation is
-recorded in
-`metadata.coverage_limitations`. No files are written.
+`pr_review`, `pr_inline_review_comment`, and `commit` activities.
+Coverage limitations are recorded in `metadata.coverage_limitations`. No files
+are written.
 
 Months use exact UTC half-open boundaries. Future months and invalid inputs are
 rejected before network requests. The ongoing flag uses collection start, even
@@ -58,6 +57,33 @@ can be expensive for large repositories. Requests begin
 with 100-item pages and reuse the client's page reductions and retry policy.
 Issue collection is skipped and recorded as a limitation when issues are
 disabled; PR collection still runs. The collector performs no persistent caching.
+
+### Buffered commit collection
+
+Both issue/PR discovery modes collect commits from the captured default-branch
+SHA using GraphQL history bounded by 24 hours before month start and 24 hours
+after the next month starts. Every returned history page is traversed, then
+commits are filtered to the exact UTC month using committed date. Authored date
+and committer metadata are preserved. Merge commits count, and each distinct
+author/co-author receives credit without increasing the repository commit count.
+Committers receive no separate credit. Headlines are included; full messages are
+omitted. GitHub-linked accounts use node IDs; unlinked Git identities use
+estimated email/name keys without inferred account matches or bot status.
+Commit-linked accounts reuse canonical issue/PR identities or are resolved by
+node ID once per run: GitHub can project a bot as a User inside commit authorship.
+
+The buffer accommodates small clock errors but cannot guarantee completeness:
+GitHub's lower date bound may prune traversal before reaching an in-month
+ancestor when intermediate timestamps are unusually old. Full issue/PR discovery
+still uses this buffered commit query. Counts support trend reporting and annual
+summaries rather than exhaustive historical audits.
+
+New reports record the actual strategy in `metadata.commit_history` (`bounded`).
+If buffered dates overflow or exceed GraphQL's documented supported range
+(1970-01-01 through 2099-12-13), the collector internally selects unbounded
+history (`full`) and applies the same local month filter. Legacy v1 reports
+without this optional provenance field remain readable; their strategy is
+unknown. Empty repositories produce zero commits without a history request.
 
 ### Experimental bounded parent discovery
 

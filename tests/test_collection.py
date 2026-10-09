@@ -8,7 +8,13 @@ import pytest
 import repo_history_tracking as api
 from repo_history_tracking import collection
 
-from .helpers import Response, Session, errors, repository
+from .helpers import Response, Session, empty_commits, errors, repository
+
+
+@pytest.fixture(autouse=True)
+def isolate_commits(monkeypatch):
+    monkeypatch.setattr("repo_history_tracking.commits.collect_commits", empty_commits)
+
 
 NOW = datetime(2024, 4, 15, tzinfo=timezone.utc)
 
@@ -217,7 +223,9 @@ def test_multi_month_history(session):
     assert report.metadata.repository_full_name == "new-owner/new-name"
     assert report.metadata.month_end == datetime(2024, 3, 1, tzinfo=timezone.utc)
     assert not report.metadata.ongoing
-    assert "Commits are not collected" in report.metadata.coverage_limitations[0]
+    assert any(
+        "24-hour buffer" in text for text in report.metadata.coverage_limitations
+    )
     api.validate_report(report)
     assert api.report_from_json(api.report_to_json(report)) == report
 

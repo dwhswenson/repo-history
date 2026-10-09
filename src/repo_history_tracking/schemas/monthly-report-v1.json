@@ -251,6 +251,9 @@
             "type": "string",
             "minLength": 1
           }
+        },
+        "commit_history": {
+          "enum": ["bounded", "full"]
         }
       },
       "required": [

@@ -10,7 +10,7 @@ import repo_history_tracking as api
 from repo_history_tracking import collection
 from repo_history_tracking.queries import parent_hydration_query
 
-from .helpers import Response, Session, errors, repository
+from .helpers import Response, Session, empty_commits, errors, repository
 from .test_collection import (
     actor,
     comment,
@@ -21,6 +21,12 @@ from .test_collection import (
     review,
     thread,
 )
+
+
+@pytest.fixture(autouse=True)
+def isolate_commits(monkeypatch):
+    monkeypatch.setattr("repo_history_tracking.commits.collect_commits", empty_commits)
+
 
 NOW = datetime(2024, 4, 15, tzinfo=timezone.utc)
 

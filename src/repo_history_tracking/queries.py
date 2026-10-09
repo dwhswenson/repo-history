@@ -7,6 +7,96 @@ fragment ForwardPageInfo on PageInfo {
 }
 """
 
+GIT_ACTOR_FRAGMENT = """
+fragment CommitIdentity on GitActor {
+  name
+  email
+  user {
+    __typename
+    id
+    databaseId
+    login
+    name
+    url
+  }
+}
+"""
+
+COMMIT_HISTORY_QUERY = (
+    GIT_ACTOR_FRAGMENT
+    + PAGE_INFO_FRAGMENT
+    + """
+query CommitHistory($id: ID!, $head: GitObjectID!, $first: Int!,
+                    $after: String, $since: GitTimestamp, $until: GitTimestamp) {
+  rateLimit { cost }
+  node(id: $id) {
+    ... on Repository {
+      object(oid: $head) {
+        ... on Commit {
+          history(first: $first, after: $after, since: $since, until: $until) {
+            nodes {
+              id
+              oid
+              url
+              messageHeadline
+              authoredDate
+              committedDate
+              author { ...CommitIdentity }
+              committer { ...CommitIdentity }
+              authors(first: 10) {
+                nodes { ...CommitIdentity }
+                pageInfo { ...ForwardPageInfo }
+              }
+              parents(first: 10) {
+                nodes { oid }
+                pageInfo { ...ForwardPageInfo }
+              }
+            }
+            pageInfo { ...ForwardPageInfo }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+)
+
+COMMIT_AUTHORS_QUERY = (
+    GIT_ACTOR_FRAGMENT
+    + PAGE_INFO_FRAGMENT
+    + """
+query CommitAuthors($id: ID!, $first: Int!, $after: String) {
+  rateLimit { cost }
+  node(id: $id) {
+    ... on Commit {
+      authors(first: $first, after: $after) {
+        nodes { ...CommitIdentity }
+        pageInfo { ...ForwardPageInfo }
+      }
+    }
+  }
+}
+"""
+)
+
+COMMIT_PARENTS_QUERY = (
+    PAGE_INFO_FRAGMENT
+    + """
+query CommitParents($id: ID!, $first: Int!, $after: String) {
+  rateLimit { cost }
+  node(id: $id) {
+    ... on Commit {
+      parents(first: $first, after: $after) {
+        nodes { oid }
+        pageInfo { ...ForwardPageInfo }
+      }
+    }
+  }
+}
+"""
+)
+
 REPOSITORY_FRAGMENT = """
 fragment RepositoryIdentity on Repository {
   id
@@ -45,6 +135,18 @@ fragment LifecycleActor on Actor {
   ... on Bot { id databaseId }
 }
 """
+
+COMMIT_ACTOR_QUERY = (
+    ACTOR_FRAGMENT
+    + """
+query CommitActor($id: ID!) {
+  rateLimit { cost }
+  node(id: $id) {
+    ...LifecycleActor
+  }
+}
+"""
+)
 
 ISSUE_SUBJECT_FRAGMENT = """
 fragment LifecycleIssue on Issue {
