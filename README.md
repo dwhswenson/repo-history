@@ -1,9 +1,8 @@
 # Repository history tracking
 
-Phases 1–5 provide a monthly report contract, a synchronous GitHub GraphQL
-foundation, and monthly commit, issue/PR lifecycle, comment, and review collection.
-Report file writing, CLI, and backfill are planned in later phases;
-see [SPEC.md](SPEC.md).
+Phases 1–6 provide a monthly report contract, a synchronous GitHub GraphQL
+foundation, monthly activity collection, atomic report writing, a CLI, and backfill.
+See [SPEC.md](SPEC.md) for the implementation phases.
 
 Requires Python 3.12+. Packaging and Pixi configuration are maintained together in
 `pyproject.toml`. Install with `pip install .`, or use the existing Pixi workspace:
@@ -15,6 +14,74 @@ pixi run -e dev lint
 pixi run -e dev format-check
 pixi run -e dev build
 ```
+
+## Writing reports and using the CLI
+
+Set `GH_TOKEN` or `GITHUB_TOKEN` before collecting. After installation, use:
+
+```text
+repo-history-tracking example/project --month 2024-02 --output-directory reports
+repo-history-tracking example/project --output-directory reports
+repo-history-tracking backfill example/project --start 2024-01 --end 2024-12 --output-directory reports
+repo-history-tracking backfill example/project --output-directory reports
+```
+
+The output directory is required and is created if missing. Omitting `--month`
+selects the current **UTC** month at invocation. Future months are rejected.
+Backfill includes both endpoints and collects months chronologically. Omit
+`--start` to begin at repository creation, and `--end` to finish at the current
+UTC month, including empty months. Either endpoint can be supplied independently.
+Imported commits older than repository creation require an explicit earlier start.
+Both commands accept `--discovery full|bounded`; bounded is the default and remains
+experimental. Use `--discovery full` for reference traversal.
+`python -m repo_history_tracking` supports the same commands.
+With Pixi, prefix commands with `pixi run`, for example
+`pixi run repo-history-tracking --help`.
+
+Each successful month prints its saved path to stdout immediately. Progress and
+API usage go to stderr. `--verbose` includes debug diagnostics; `--quiet` suppresses
+paths and all diagnostics except errors. Exit codes are 0 for success, 2 for
+invalid arguments, and 1 for collection, validation, or filesystem failures.
+Rate-limit errors include available retry/reset guidance and stop the run.
+
+Python callers can collect without writing, write an existing report, or backfill:
+
+```python
+from repo_history_tracking import backfill, collect_month, write_report
+
+report = collect_month("example", "project", 2024, 2)
+path = write_report(report, "reports")  # pathlib.Path: reports/2024-02.json
+paths = backfill(
+    "example",
+    "project",
+    "2024-01",
+    "2024-12",
+    output_directory="reports",
+    discovery="bounded",
+)
+```
+
+`backfill("example", "project", output_directory="reports")` uses the same
+automatic endpoints. `backfill` also accepts `token=None` and returns a
+chronological list of saved paths on success. A failure raises immediately; already completed months remain
+usable. There is no automatic skipping, rollback, or resume. Reruns replace every
+requested month, including during backfill, without changing other months.
+
+An output directory holds monthly reports for **one repository node ID**.
+Before writing, every direct child named `YYYY-MM.json` must be a valid report,
+match its filename's month, and share that repository identity. Repository renames
+are allowed. Damaged files are rejected even when being replaced; move or repair
+them before retrying. Unrelated filenames and nested directories are ignored.
+Backfill and the CLI check existing files before making network requests; repository
+identity is compared when collection returns a report.
+
+Writing validates the report, writes and validates a temporary UTF-8 file in the
+destination directory, and atomically replaces the target. Failure before
+replacement preserves the old file and cleans up the temporary file. Invalid
+incoming reports raise `ReportValidationError`; invalid or conflicting existing
+files raise `ReportWriteError` with the filename; filesystem errors propagate.
+Writers must run sequentially or use external coordination. Atomic replacement
+does not provide power-loss durability or a transactional multi-month backfill.
 
 Test suites mirror source module names with a `test_` prefix: for example,
 `tests/test_queries.py` tests
@@ -37,7 +104,7 @@ for activity in report.activities:
 text = report_to_json(report)
 ```
 
-`collect_month(owner, repo, year, month, *, token=None, discovery="full")` returns
+`collect_month(owner, repo, year, month, *, token=None, discovery="bounded")` returns
 a validated `MonthlyReport` containing `issue_opened`, `issue_closed`, `issue_reopened`,
 `pr_opened`, `pr_merged`, `issue_comment`, `pr_conversation_comment`,
 `pr_review`, `pr_inline_review_comment`, and `commit` activities.
@@ -50,7 +117,7 @@ if the run finishes in a later month. Repository identity and the default-branch
 head are captured once before traversal, including a null head for an empty
 repository. The function owns and closes its client, including on failure.
 
-By default (`discovery="full"`), all issue/PR parent pages, lifecycle timelines,
+With `discovery="full"`, all issue/PR parent pages, lifecycle timelines,
 conversation comments, reviews, review threads, and thread comments are traversed independently, without
 creation-date or current-state filters. This finds events on older parents but
 can be expensive for large repositories. Requests begin
@@ -119,8 +186,9 @@ raise `ValueError` before requests. A failure never switches strategies or
 returns a partial report. For January of year 1 only, bounded mode selects full
 traversal before discovery to avoid overlap underflow and logs that selection.
 The selected strategy is logged at INFO rather than added to report metadata.
-Instrumentation, comparison tooling, live verification, and default rollout are
-separate follow-on work described in `PERFORMANCE.md`.
+Bounded discovery is now the default by user preference; its completeness
+assumptions remain unverified. Instrumentation, comparison tooling, and live
+verification remain follow-on work described in `PERFORMANCE.md`.
 
 ### Activity normalization
 
@@ -183,7 +251,7 @@ with GraphQLClient() as client:
 ```
 
 The immutable `RepositorySnapshot` contains `repository_node_id`, current
-`repository_full_name` and `repository_url`, `issues_enabled`, `default_branch`,
+`repository_full_name` and `repository_url`, `database_id`, `issues_enabled`, `default_branch`,
 and `default_branch_head`. Empty repositories have null branch/head. This lookup
 captures the head for later history traversal; it does not collect activities.
 The client owns its session: use a context manager or call `close()`. It is intended

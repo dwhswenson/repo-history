@@ -79,7 +79,7 @@ def collect_month(
     month: int,
     *,
     token: str | None = None,
-    discovery: str = "full",
+    discovery: str = "bounded",
 ) -> MonthlyReport:
     """Return a validated activity report for one UTC calendar month.
 
@@ -87,7 +87,7 @@ def collect_month(
     See coverage limitations before interpreting counts. A failed traversal
     raises without returning a partial report. Authentication falls back to
     GH_TOKEN, then GITHUB_TOKEN. The client is always closed on exit.
-    Discovery defaults to full traversal. The opt-in bounded strategy is
+    Discovery defaults to bounded traversal. The bounded strategy is
     experimental: completeness of parent update timestamps is unverified.
     """
     if any(not isinstance(value, str) or not value.strip() for value in (owner, repo)):
@@ -483,7 +483,7 @@ def _collect_inline_comments(
 
 
 def _collect_month(
-    client, owner, repo, start, end, started, discovery="full"
+    client, owner, repo, start, end, started, discovery="bounded"
 ) -> MonthlyReport:
     from .commits import BOUNDED_LIMITATION, collect_commits
 

@@ -9,6 +9,10 @@ class ReportValidationError(ValueError):
         super().__init__(f"{path}: {message}")
 
 
+class ReportWriteError(ValueError):
+    """Existing destination reports are invalid or inconsistent."""
+
+
 class GitHubAPIError(RuntimeError):
     """Safe diagnostics for a failed or incomplete GitHub operation."""
 

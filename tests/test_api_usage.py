@@ -46,7 +46,7 @@ def summary(caplog):
 
 def test_full_run_logs_sum_of_query_costs_and_zero_rest(session, caplog):
     session.responses = [cost(repository(), 2), cost(connection("pullRequests"), 7)]
-    report = api.collect_month("o", "r", 2024, 2, token="test")
+    report = api.collect_month("o", "r", 2024, 2, token="test", discovery="full")
     assert summary(caplog) == (
         "GitHub API usage status=completed REST points=0 unmeasured_attempts=0 "
         "GraphQL points=9 unmeasured_attempts=0"
@@ -83,7 +83,7 @@ def test_failed_run_logs_retry_and_error_costs(session, caplog):
         cost(errors("FORBIDDEN"), 5),
     ]
     with pytest.raises(api.GraphQLError):
-        api.collect_month("o", "r", 2024, 2, token="test")
+        api.collect_month("o", "r", 2024, 2, token="test", discovery="full")
     assert summary(caplog) == (
         "GitHub API usage status=failed REST points=0 unmeasured_attempts=0 "
         "GraphQL points=14 unmeasured_attempts=0"
@@ -98,7 +98,7 @@ def test_network_and_unreported_costs_are_explicitly_unmeasured(session, caplog)
         Response(status=503),
         cost(connection("pullRequests"), 4),
     ]
-    api.collect_month("o", "r", 2024, 2, token="test")
+    api.collect_month("o", "r", 2024, 2, token="test", discovery="full")
     assert summary(caplog) == (
         "GitHub API usage status=completed REST points=0 unmeasured_attempts=0 "
         "GraphQL points=6 unmeasured_attempts=2"
@@ -137,7 +137,7 @@ def test_usage_starts_fresh_for_each_collection(session, caplog):
             cost(repository(), 1),
             cost(connection("pullRequests"), points),
         ]
-        api.collect_month("o", "r", 2024, 2, token="test")
+        api.collect_month("o", "r", 2024, 2, token="test", discovery="full")
         assert f"GraphQL points={points + 1} unmeasured_attempts=0" in summary(caplog)
 
 
@@ -148,5 +148,5 @@ def test_collector_queries_all_request_primary_cost():
         getattr(queries, name) for name in dir(queries) if name.endswith("_QUERY")
     ]
     documents.append(parent_hydration_query(50))
-    assert len(documents) == 15
+    assert len(documents) == 16
     assert all(document.count("rateLimit { cost }") == 1 for document in documents)

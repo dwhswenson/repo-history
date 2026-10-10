@@ -102,6 +102,7 @@ def errors(*kinds, status=200, headers=None):
 def repository(**updates):
     item = {
         "id": "R_example",
+        "databaseId": 123,
         "nameWithOwner": "new-owner/new-name",
         "url": "https://github.com/new-owner/new-name",
         "hasIssuesEnabled": False,

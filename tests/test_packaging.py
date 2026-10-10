@@ -70,6 +70,7 @@ from repo_history_tracking.queries import REPOSITORY_QUERY, PAGE_INFO_FRAGMENT
 assert 'query RepositoryLookup' in REPOSITORY_QUERY
 assert 'endCursor' in PAGE_INFO_FRAGMENT
 for name in ('collect_month', 'GraphQLClient', 'resolve_token', 'RepositorySnapshot',
+             'write_report', 'backfill', 'ReportWriteError',
              'lookup_repository', 'GitHubAPIError', 'AuthenticationError',
              'TransportError', 'GraphQLError', 'RateLimitError',
              'PaginationError', 'RepositoryUnavailableError', 'QueryResourceError'):
@@ -87,3 +88,17 @@ for text in json.load(sys.stdin):
         text=True,
     )
     assert result.returncode == 0
+    for command in (
+        [str(environment / "bin" / "repo-history-tracking")],
+        [str(python), "-I", "-m", "repo_history_tracking"],
+    ):
+        for arguments in (["--help"], ["backfill", "--help"]):
+            result = subprocess.run(
+                [*command, *arguments],
+                cwd=tmp_path,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            assert "--output-directory" in result.stdout
+            assert "--discovery" in result.stdout

@@ -620,13 +620,26 @@ def test_multiple_hydration_batches_succeed(session):
     api.validate_report(report)
 
 
-def test_explicit_full_matches_default_request_sequence(session):
-    history = [repository(), connection("pullRequests")]
+def test_explicit_bounded_matches_default_request_sequence(session):
+    history = [repository(), Response([])]
     session.responses = deepcopy(history)
     default = api.collect_month("o", "r", 2024, 2, token="test")
     calls = deepcopy(session.calls)
     session.calls.clear()
     session.responses = deepcopy(history)
-    full = api.collect_month("o", "r", 2024, 2, token="test", discovery="full")
-    assert default == full
+    explicit = api.collect_month("o", "r", 2024, 2, token="test", discovery="bounded")
+    assert default == explicit
     assert session.calls == calls
+
+
+def test_live_style_numeric_pagination_path(session):
+    target = "https://api.github.com/repositories/123/issues?page=2"
+    bounded(
+        session,
+        [
+            repository(),
+            Response([], headers={"Link": f'<{target}>; rel="next"'}),
+            Response([]),
+        ],
+    )
+    assert session.calls[2][0] == target

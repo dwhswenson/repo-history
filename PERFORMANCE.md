@@ -1,5 +1,9 @@
 # Collector performance plan
 
+Bounded discovery is now the default by user preference. The validation work
+below remains outstanding; this default change does not establish completeness.
+Full traversal remains available through `discovery="full"`.
+
 ## Objective and current behavior
 
 Reduce the API work needed to collect one UTC month without changing activity,

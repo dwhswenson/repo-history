@@ -100,6 +100,7 @@ query CommitParents($id: ID!, $first: Int!, $after: String) {
 REPOSITORY_FRAGMENT = """
 fragment RepositoryIdentity on Repository {
   id
+  databaseId
   nameWithOwner
   url
   hasIssuesEnabled
@@ -125,6 +126,13 @@ query RepositoryLookup($owner: String!, $name: String!) {
 }
 """
 )
+
+BACKFILL_REPOSITORY_QUERY = """
+query BackfillRepository($owner: String!, $name: String!) {
+  rateLimit { cost }
+  repository(owner: $owner, name: $name) { id createdAt }
+}
+"""
 
 ACTOR_FRAGMENT = """
 fragment LifecycleActor on Actor {

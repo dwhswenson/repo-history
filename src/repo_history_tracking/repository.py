@@ -16,6 +16,7 @@ class RepositorySnapshot:
     issues_enabled: bool
     default_branch: str | None
     default_branch_head: str | None
+    database_id: int | None = None
 
 
 def lookup_repository(
@@ -46,6 +47,9 @@ def lookup_repository(
     ):
         raise GraphQLError("malformed repository metadata", operation=operation)
     branch = item["defaultBranchRef"]
+    database_id = item.get("databaseId")
+    if database_id is not None and (type(database_id) is not int or database_id <= 0):
+        raise GraphQLError("malformed repository database ID", operation=operation)
     name = head = None
     if branch is None:
         if not item["isEmpty"]:
@@ -72,4 +76,5 @@ def lookup_repository(
         item["hasIssuesEnabled"],
         name,
         head,
+        database_id,
     )

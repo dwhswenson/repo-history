@@ -7,14 +7,14 @@ Build a Python library and CLI whose primary operation collects **one month of a
 Reports support casual activity reporting, year-over-year growth analysis, and annual reports to funders. Counts should be useful and consistent, but exhaustive historical reconstruction is not required. Document known coverage limitations and favor practical collection costs where the tradeoff is explicit. Exact month assignment, attribution rules, deduplication, and internally consistent summaries still apply to collected events.
 
 ```python
-collect_month(owner, repo, year, month, *, token=None, discovery="full") -> MonthlyReport
+collect_month(owner, repo, year, month, *, token=None, discovery="bounded") -> MonthlyReport
 ```
 
 ```text
 repo-history-tracking OWNER/REPO --month YYYY-MM --output-directory PATH
 ```
 
-Omitting `--month` selects the current UTC month. A separate `backfill` command accepts inclusive starting and ending months and invokes the same monthly operation.
+Omitting `--month` selects the current UTC month. A separate `backfill` command accepts optional inclusive starting and ending months and invokes the same monthly operation. Omitted start uses the repository creation month; omitted end uses the current UTC month. Either endpoint can be set independently. Include empty months; imported commits predating repository creation require an explicit earlier start.
 
 Commit history uses buffered date-bounded collection in both issue/PR parent `discovery` modes. There is no separate public commit-history option.
 
@@ -72,8 +72,8 @@ Supplement schema validation with checks that actor references resolve, event ID
 
 - A monthly run collects and writes only the requested month. It may inspect older parent objects to find that month's activity; it must not generate earlier reports or require earlier outputs.
 - Do not select parent issues or PRs solely by creation month or current state. An old, closed PR can receive a new comment or review; an old issue can close or reopen in the requested month.
-- Full issue/PR parent traversal (`discovery="full"`) remains the default and reference behavior for parent discovery. Use repository connections directly, GraphQL variables, and reusable fragments. Independently paginate parents and nested timelines, comments, reviews, review threads, and commit authors. Detect missing or repeated cursors. [Pagination documentation](https://docs.github.com/en/graphql/guides/using-pagination-in-the-graphql-api)
-- Experimental `discovery="bounded"` may use REST repository issues with all states and an overlapping update-time `since`, local `updated_at >= start` / `created_at < end` selection, and GraphQL hydration by repository identity and item number. Preserve all nested activity rules and the report schema. Completeness of REST parent update timestamps, including live discovery with issues disabled, remains unverified; do not promote this mode to the default without the acceptance work in PERFORMANCE.md. Excluded parent histories are outside bounded mode's validation scope. Failures never silently switch strategies; January of year 1 selects full traversal before discovery because the overlap would underflow.
+- Full issue/PR parent traversal (`discovery="full"`) remains the explicit reference behavior for parent discovery. Use repository connections directly, GraphQL variables, and reusable fragments. Independently paginate parents and nested timelines, comments, reviews, review threads, and commit authors. Detect missing or repeated cursors. [Pagination documentation](https://docs.github.com/en/graphql/guides/using-pagination-in-the-graphql-api)
+- Default `discovery="bounded"` uses REST repository issues with all states and an overlapping update-time `since`, local `updated_at >= start` / `created_at < end` selection, and GraphQL hydration by repository identity and item number. Preserve all nested activity rules and the report schema. Completeness of REST parent update timestamps, including live discovery with issues disabled, remains unverified. Bounded is the default by user preference; the acceptance work in PERFORMANCE.md remains outstanding. Excluded parent histories are outside bounded mode's validation scope. Failures never silently switch strategies; January of year 1 selects full traversal before discovery because the overlap would underflow.
 - Enforce exact month boundaries locally after retrieval. Apply API date filters with understood semantics and explicit coverage limitations.
 - Capture the default-branch head before traversing commits. Use that SHA as the history root in both commit-history strategies.
 - Commit collection requests history with `since = month start - 24 hours` and `until = next month start + 24 hours`. Fully paginate the API results, then retain only commits whose committed dates fall in the exact requested month. This buffer accommodates small timestamp inversions but does not guarantee exhaustive retrieval: the API's lower bound can prune traversal before reaching matching ancestors. Record the strategy and this limitation in report metadata. If buffered bounds fall outside the API's documented supported date range, select full history traversal before querying and record the strategy actually used.

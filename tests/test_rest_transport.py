@@ -326,3 +326,38 @@ def test_get_bearer_auth_is_not_overridden_by_netrc(monkeypatch):
     with api.GraphQLClient("explicit-token") as client:
         prepared = client._session.prepare_request(requests.Request("GET", URL))
         assert prepared.headers["Authorization"] == "Bearer explicit-token"
+
+
+def test_numeric_repository_pagination_alias(client):
+    target = "https://api.github.com/repositories/123/issues?page=2"
+    client._session.responses = [
+        Response([{"number": 1}], headers={"Link": f'<{target}>; rel="next"'}),
+        Response([{"number": 2}]),
+    ]
+    assert list(
+        iter_rest_list(
+            client, URL, operation_name="TestREST", repository_database_id=123
+        )
+    ) == [{"number": 1}, {"number": 2}]
+    assert client._session.calls[1][0] == target
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "https://api.github.com/repositories/124/issues?page=2",
+        "https://api.github.com/repositories/123/pulls?page=2",
+        "https://evil.example/repositories/123/issues?page=2",
+    ],
+)
+def test_numeric_repository_pagination_rejects_other_targets(client, target):
+    client._session.responses = [
+        Response([{"number": 1}], headers={"Link": f'<{target}>; rel="next"'})
+    ]
+    with pytest.raises(api.PaginationError):
+        next(
+            iter_rest_list(
+                client, URL, operation_name="TestREST", repository_database_id=123
+            )
+        )
+    assert len(client._session.calls) == 1

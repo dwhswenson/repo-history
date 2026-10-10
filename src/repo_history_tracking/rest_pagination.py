@@ -1,4 +1,4 @@
-"""Strict, same-endpoint GitHub REST Link pagination."""
+"""Strict GitHub REST pagination with verified repository endpoint aliases."""
 
 import re
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -6,7 +6,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from .errors import PaginationError
 
 
-def _checked_url(url, expected_path, operation):
+def _checked_url(url, expected_paths, operation):
     try:
         parsed = urlsplit(url)
         if (
@@ -17,7 +17,7 @@ def _checked_url(url, expected_path, operation):
             or parsed.password is not None
             or parsed.fragment
             or "#" in url
-            or parsed.path != expected_path
+            or parsed.path not in expected_paths
             or any(c.isspace() or ord(c) < 32 for c in url)
             or "\\" in url
         ):
@@ -59,11 +59,18 @@ def _next_link(header, operation):
     return next_url
 
 
-def iter_rest_list(client, url, *, operation_name):
-    expected_path = urlsplit(url).path
+def iter_rest_list(client, url, *, operation_name, repository_database_id=None):
+    expected_paths = {urlsplit(url).path}
+    if repository_database_id is not None:
+        if type(repository_database_id) is not int or repository_database_id <= 0:
+            raise PaginationError(
+                "invalid repository database ID", operation=operation_name
+            )
+        # GitHub Link headers can replace owner/name with this verified numeric ID.
+        expected_paths.add(f"/repositories/{repository_database_id}/issues")
     seen = set()
     while url is not None:
-        normalized = _checked_url(url, expected_path, operation_name)
+        normalized = _checked_url(url, expected_paths, operation_name)
         if normalized in seen:
             raise PaginationError(
                 "repeated REST pagination URL", operation=operation_name
@@ -73,7 +80,7 @@ def iter_rest_list(client, url, *, operation_name):
         url = _next_link(link, operation_name)
         if url is not None:
             # Reject unsafe or looping links before exposing any items from this page.
-            target = _checked_url(url, expected_path, operation_name)
+            target = _checked_url(url, expected_paths, operation_name)
             if target in seen:
                 raise PaginationError(
                     "repeated REST pagination URL", operation=operation_name

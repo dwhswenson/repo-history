@@ -221,7 +221,7 @@ def test_empty_repository_skips_history(session):
         repository(isEmpty=True, defaultBranchRef=None),
         connection("pullRequests"),
     ]
-    report = api.collect_month("o", "r", 2024, 2, token="test")
+    report = api.collect_month("o", "r", 2024, 2, token="test", discovery="full")
     assert not payloads(session)
     assert report.summaries.repository_counts["commit"] == 0
     assert report.metadata.commit_history == "bounded"
@@ -370,7 +370,7 @@ def test_combined_pr_and_commit_counts_and_api_cost(session, caplog):
     for response in responses:
         response.body["data"]["rateLimit"] = {"cost": 2}
     session.responses = responses
-    report = api.collect_month("o", "r", 2024, 2, token="test")
+    report = api.collect_month("o", "r", 2024, 2, token="test", discovery="full")
     assert report.summaries.repository_counts["pr_opened"] == 1
     assert report.summaries.repository_counts["commit"] == 1
     assert report.summaries.distinct_actors.total == 1
@@ -416,7 +416,7 @@ def test_commit_user_projection_of_bot_preserves_canonical_identity(
         else [connection("pullRequests")]
     )
     session.responses = [repository(), *pr_responses, history([value, deepcopy(value)])]
-    report = api.collect_month("o", "r", 2024, 2, token="test")
+    report = api.collect_month("o", "r", 2024, 2, token="test", discovery="full")
     registered = next(a for a in report.actors if a.key == key)
     assert registered.classification == "bot"
     assert registered.login == "copilot-pull-request-reviewer"

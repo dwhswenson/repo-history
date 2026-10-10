@@ -1,6 +1,7 @@
 """Monthly repository activity contract, independent of GitHub collection."""
 
 from .authentication import resolve_token
+from .backfill import backfill
 from .collection import collect_month
 from .errors import (
     AuthenticationError,
@@ -10,6 +11,7 @@ from .errors import (
     QueryResourceError,
     RateLimitError,
     ReportValidationError,
+    ReportWriteError,
     RepositoryUnavailableError,
     TransportError,
 )
@@ -42,8 +44,12 @@ from .serialization import report_from_json, report_to_json
 from .summaries import derive_summaries
 from .transport import GraphQLClient
 from .validation import load_schema, validate_report
+from .writing import write_report
 
 __all__ = [
+    "backfill",
+    "write_report",
+    "ReportWriteError",
     "AuthenticationError",
     "GitHubAPIError",
     "GraphQLClient",

@@ -90,7 +90,9 @@ def session(monkeypatch):
 
 def collect(session, responses, *, year=2024, month=2):
     session.responses = responses
-    report = api.collect_month("old-owner", "old-name", year, month, token="test-token")
+    report = api.collect_month(
+        "old-owner", "old-name", year, month, token="test-token", discovery="full"
+    )
     assert session.closed
     assert not session.responses
     return report
@@ -390,14 +392,14 @@ def test_empty_month_and_disabled_issues(session, empty_repository):
 )
 def test_invalid_month_before_network(session, year, month):
     with pytest.raises(ValueError):
-        api.collect_month("owner", "repo", year, month, token="test")
+        api.collect_month("owner", "repo", year, month, token="test", discovery="full")
     assert not session.calls
 
 
 @pytest.mark.parametrize("owner,repo", [("", "repo"), ("owner", " "), (None, "repo")])
 def test_invalid_repository_before_network(session, owner, repo):
     with pytest.raises(ValueError):
-        api.collect_month(owner, repo, 2024, 2, token="test")
+        api.collect_month(owner, repo, 2024, 2, token="test", discovery="full")
     assert not session.calls
 
 
@@ -449,7 +451,7 @@ def test_ongoing_is_fixed_at_collection_start(session, monkeypatch):
 def test_environment_authentication(session, monkeypatch):
     monkeypatch.setenv("GH_TOKEN", "environment-token")
     session.responses = [repository(), connection("pullRequests")]
-    api.collect_month("owner", "repo", 2024, 2)
+    api.collect_month("owner", "repo", 2024, 2, discovery="full")
     assert session.headers["Authorization"] == "Bearer environment-token"
     assert session.closed
 
@@ -472,7 +474,7 @@ def test_late_failure_closes_client_without_returning_report(session, tail, expe
         tail,
     ]
     with pytest.raises(expected):
-        api.collect_month("owner", "repo", 2024, 2, token="test")
+        api.collect_month("owner", "repo", 2024, 2, token="test", discovery="full")
     assert session.closed
 
 
@@ -485,7 +487,7 @@ def test_null_nodes_fail(session, field, nodes):
         session.responses.append(connection("pullRequests", [parent()]))
     session.responses.append(connection(field, nodes))
     with pytest.raises(api.GraphQLError):
-        api.collect_month("owner", "repo", 2024, 2, token="test")
+        api.collect_month("owner", "repo", 2024, 2, token="test", discovery="full")
     assert session.closed
 
 
@@ -512,7 +514,7 @@ def test_malformed_events_fail(session, change):
         connection("reviewThreads"),
     ]
     with pytest.raises(api.GraphQLError):
-        api.collect_month("owner", "repo", 2024, 2, token="test")
+        api.collect_month("owner", "repo", 2024, 2, token="test", discovery="full")
     assert session.closed
 
 
@@ -529,7 +531,7 @@ def test_malformed_events_fail(session, change):
 def test_malformed_parents_fail(session, change):
     session.responses = [repository(), connection("pullRequests", [parent(**change)])]
     with pytest.raises(api.GraphQLError):
-        api.collect_month("owner", "repo", 2024, 2, token="test")
+        api.collect_month("owner", "repo", 2024, 2, token="test", discovery="full")
     assert session.closed
 
 
@@ -545,7 +547,7 @@ def test_missing_required_field_is_not_treated_as_null(session):
         connection("reviewThreads"),
     ]
     with pytest.raises(api.GraphQLError, match="actor"):
-        api.collect_month("owner", "repo", 2024, 2, token="test")
+        api.collect_month("owner", "repo", 2024, 2, token="test", discovery="full")
 
 
 @pytest.mark.parametrize("conflicting", [False, True])
@@ -565,9 +567,11 @@ def test_duplicate_events(session, conflicting):
     ]
     if conflicting:
         with pytest.raises(api.GraphQLError, match="conflicting lifecycle event ID"):
-            api.collect_month("owner", "repo", 2024, 2, token="test")
+            api.collect_month("owner", "repo", 2024, 2, token="test", discovery="full")
     else:
-        report = api.collect_month("owner", "repo", 2024, 2, token="test")
+        report = api.collect_month(
+            "owner", "repo", 2024, 2, token="test", discovery="full"
+        )
         assert len(report.activities) == 1
         assert report.summaries.repository_counts["pr_merged"] == 1
     assert session.closed
@@ -576,7 +580,7 @@ def test_duplicate_events(session, conflicting):
 @pytest.mark.parametrize("year,month", [(10**100, 2), (2024, 10**100)])
 def test_out_of_range_integers_are_value_errors(session, year, month):
     with pytest.raises(ValueError, match="unsupported calendar month"):
-        api.collect_month("owner", "repo", year, month, token="test")
+        api.collect_month("owner", "repo", year, month, token="test", discovery="full")
     assert not session.calls
 
 
@@ -597,7 +601,7 @@ def test_conflicting_actor_classification_fails(session):
         connection("reviewThreads"),
     ]
     with pytest.raises(api.GraphQLError, match="conflicting actor classification"):
-        api.collect_month("owner", "repo", 2024, 2, token="test")
+        api.collect_month("owner", "repo", 2024, 2, token="test", discovery="full")
     assert session.closed
 
 
@@ -802,7 +806,7 @@ def test_duplicate_authored_events(session, kind, conflicting):
     if conflicting:
         session.responses = history
         with pytest.raises(api.GraphQLError, match="conflicting lifecycle event ID"):
-            api.collect_month("owner", "repo", 2024, 2, token="test")
+            api.collect_month("owner", "repo", 2024, 2, token="test", discovery="full")
         assert session.closed
     else:
         report = collect(session, history)
@@ -830,7 +834,7 @@ def test_invalid_inline_comment_fails(session, changes):
         ]
     )
     with pytest.raises(api.GraphQLError):
-        api.collect_month("owner", "repo", 2024, 2, token="test")
+        api.collect_month("owner", "repo", 2024, 2, token="test", discovery="full")
     assert session.closed
 
 
@@ -846,7 +850,7 @@ def test_invalid_inline_comment_fails(session, changes):
 def test_invalid_review_fails(session, changes):
     session.responses = pr_history(reviews=[review(**changes)])
     with pytest.raises(api.GraphQLError):
-        api.collect_month("owner", "repo", 2024, 2, token="test")
+        api.collect_month("owner", "repo", 2024, 2, token="test", discovery="full")
     assert session.closed
 
 
@@ -872,7 +876,7 @@ def test_null_nested_nodes_fail(session, field):
     history[index] = connection(field, [None])
     session.responses = history
     with pytest.raises(api.GraphQLError):
-        api.collect_month("owner", "repo", 2024, 2, token="test")
+        api.collect_month("owner", "repo", 2024, 2, token="test", discovery="full")
     assert session.closed
 
 
@@ -888,7 +892,7 @@ def test_late_thread_comment_failure(session, tail):
         ]
     )
     with pytest.raises(api.GitHubAPIError):
-        api.collect_month("owner", "repo", 2024, 2, token="test")
+        api.collect_month("owner", "repo", 2024, 2, token="test", discovery="full")
     assert session.closed
 
 
@@ -959,7 +963,7 @@ def test_malformed_thread_fails(session, changes):
         threads=[connection("reviewThreads", [thread(**changes)])]
     )
     with pytest.raises(api.GraphQLError):
-        api.collect_month("owner", "repo", 2024, 2, token="test")
+        api.collect_month("owner", "repo", 2024, 2, token="test", discovery="full")
     assert session.closed
 
 
@@ -988,7 +992,7 @@ def test_missing_authored_source_field_fails(session, kind, field):
         else [connection("reviewThreads")],
     )
     with pytest.raises(api.GraphQLError, match=field):
-        api.collect_month("owner", "repo", 2024, 2, token="test")
+        api.collect_month("owner", "repo", 2024, 2, token="test", discovery="full")
     assert session.closed
 
 

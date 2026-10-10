@@ -69,7 +69,12 @@ def discover_parents(client, repository, start, end, *, strategy):
     )
     observed = {}
     retained = {}
-    for item in iter_rest_list(client, url, operation_name=OPERATION):
+    for item in iter_rest_list(
+        client,
+        url,
+        operation_name=OPERATION,
+        repository_database_id=repository.database_id,
+    ):
         number = item.get("number")
         if type(number) is not int or not 1 <= number <= 2**31 - 1:
             raise TransportError("malformed discovery number", operation=OPERATION)

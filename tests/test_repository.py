@@ -24,6 +24,7 @@ def test_repository_lookup(client):
         False,
         "main",
         "a" * 40,
+        123,
     )
     payload = client._session.calls[0][1]["json"]
     assert payload["query"] == REPOSITORY_QUERY
@@ -66,6 +67,8 @@ def test_empty_repository(client):
             api.GraphQLError,
         ),
         (repository(hasIssuesEnabled=None), api.GraphQLError),
+        (repository(databaseId=True), api.GraphQLError),
+        (repository(databaseId=-1), api.GraphQLError),
     ],
 )
 def test_bad_repository(client, response, error):
