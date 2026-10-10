@@ -1,0 +1,1351 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:repo-history-tracking:monthly-report:1",
+  "title": "Monthly repository activity report v1",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "metadata": {
+      "$ref": "#/$defs/metadata"
+    },
+    "actors": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/actor"
+      }
+    },
+    "activities": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/activity"
+      }
+    },
+    "summaries": {
+      "$ref": "#/$defs/summaries"
+    }
+  },
+  "required": [
+    "schema_version",
+    "metadata",
+    "actors",
+    "activities",
+    "summaries"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "actor": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "classification": {
+          "enum": [
+            "human",
+            "bot",
+            "unresolved_git"
+          ]
+        },
+        "github_node_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "database_id": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "login": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "display_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uri",
+              "pattern": "^https://"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "git_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "git_email": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "key",
+        "classification",
+        "github_node_id",
+        "database_id",
+        "login",
+        "display_name",
+        "url",
+        "git_name",
+        "git_email"
+      ],
+      "additionalProperties": false
+    },
+    "git_identity": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "email": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "actor_key": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "email",
+        "actor_key"
+      ],
+      "additionalProperties": false
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "repository_node_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "repository_full_name": {
+          "type": "string",
+          "pattern": "^[^/\\s]+/[^/\\s]+$"
+        },
+        "repository_url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://"
+        },
+        "month": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$"
+        },
+        "month_start": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "Z$"
+        },
+        "month_end": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "Z$"
+        },
+        "collection_started_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "Z$"
+        },
+        "collection_finished_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "Z$"
+        },
+        "ongoing": {
+          "type": "boolean"
+        },
+        "default_branch": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "default_branch_head": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "coverage_limitations": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "commit_history": {
+          "enum": ["bounded", "full"]
+        }
+      },
+      "required": [
+        "repository_node_id",
+        "repository_full_name",
+        "repository_url",
+        "month",
+        "month_start",
+        "month_end",
+        "collection_started_at",
+        "collection_finished_at",
+        "ongoing",
+        "default_branch",
+        "default_branch_head",
+        "coverage_limitations"
+      ],
+      "additionalProperties": false
+    },
+    "subject": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "enum": [
+            "commit",
+            "issue",
+            "pull_request"
+          ]
+        },
+        "node_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string",
+          "pattern": "^[^\\r\\n]*$"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uri",
+              "pattern": "^https://"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "number": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "author_key": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "node_id",
+        "title",
+        "url",
+        "number",
+        "author_key"
+      ],
+      "additionalProperties": false
+    },
+    "credit": {
+      "type": "object",
+      "properties": {
+        "actor_key": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "role": {
+          "enum": [
+            "author",
+            "co_author",
+            "merger",
+            "closer",
+            "reopener"
+          ]
+        }
+      },
+      "required": [
+        "actor_key",
+        "role"
+      ],
+      "additionalProperties": false
+    },
+    "counts": {
+      "type": "object",
+      "properties": {
+        "commit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pr_opened": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pr_merged": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "issue_opened": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "issue_closed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "issue_reopened": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "issue_comment": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pr_conversation_comment": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pr_inline_review_comment": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pr_review": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "commit",
+        "pr_opened",
+        "pr_merged",
+        "issue_opened",
+        "issue_closed",
+        "issue_reopened",
+        "issue_comment",
+        "pr_conversation_comment",
+        "pr_inline_review_comment",
+        "pr_review"
+      ],
+      "additionalProperties": false
+    },
+    "population": {
+      "type": "object",
+      "properties": {
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "human": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bot": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unresolved_git": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "total",
+        "human",
+        "bot",
+        "unresolved_git"
+      ],
+      "additionalProperties": false
+    },
+    "summaries": {
+      "type": "object",
+      "properties": {
+        "repository_counts": {
+          "$ref": "#/$defs/counts"
+        },
+        "actor_counts": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/counts"
+          }
+        },
+        "distinct_actors": {
+          "$ref": "#/$defs/population"
+        },
+        "distinct_actors_by_type": {
+          "type": "object",
+          "properties": {
+            "commit": {
+              "$ref": "#/$defs/population"
+            },
+            "pr_opened": {
+              "$ref": "#/$defs/population"
+            },
+            "pr_merged": {
+              "$ref": "#/$defs/population"
+            },
+            "issue_opened": {
+              "$ref": "#/$defs/population"
+            },
+            "issue_closed": {
+              "$ref": "#/$defs/population"
+            },
+            "issue_reopened": {
+              "$ref": "#/$defs/population"
+            },
+            "issue_comment": {
+              "$ref": "#/$defs/population"
+            },
+            "pr_conversation_comment": {
+              "$ref": "#/$defs/population"
+            },
+            "pr_inline_review_comment": {
+              "$ref": "#/$defs/population"
+            },
+            "pr_review": {
+              "$ref": "#/$defs/population"
+            }
+          },
+          "required": [
+            "commit",
+            "pr_opened",
+            "pr_merged",
+            "issue_opened",
+            "issue_closed",
+            "issue_reopened",
+            "issue_comment",
+            "pr_conversation_comment",
+            "pr_inline_review_comment",
+            "pr_review"
+          ],
+          "additionalProperties": false
+        },
+        "unattributed_total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unattributed_by_type": {
+          "$ref": "#/$defs/counts"
+        }
+      },
+      "required": [
+        "repository_counts",
+        "actor_counts",
+        "distinct_actors",
+        "distinct_actors_by_type",
+        "unattributed_total",
+        "unattributed_by_type"
+      ],
+      "additionalProperties": false
+    },
+    "commit_metadata": {
+      "type": "object",
+      "properties": {
+        "sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "authored_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "Z$"
+        },
+        "committer": {
+          "$ref": "#/$defs/git_identity"
+        },
+        "parent_shas": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$"
+          }
+        }
+      },
+      "required": [
+        "sha",
+        "authored_at",
+        "committer",
+        "parent_shas"
+      ],
+      "additionalProperties": false
+    },
+    "commit_activity": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "commit"
+        },
+        "occurred_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "Z$"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uri",
+              "pattern": "^https://"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "subject": {
+          "$ref": "#/$defs/subject"
+        },
+        "credits": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/credit"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "metadata": {
+          "$ref": "#/$defs/commit_metadata"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "occurred_at",
+        "url",
+        "subject",
+        "credits",
+        "metadata"
+      ],
+      "additionalProperties": false
+    },
+    "pr_opened_metadata": {
+      "type": "object",
+      "properties": {
+        "source_node_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "source_node_id"
+      ],
+      "additionalProperties": false
+    },
+    "pr_opened_activity": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "pr_opened"
+        },
+        "occurred_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "Z$"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uri",
+              "pattern": "^https://"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "subject": {
+          "$ref": "#/$defs/subject"
+        },
+        "credits": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/credit"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "metadata": {
+          "$ref": "#/$defs/pr_opened_metadata"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "occurred_at",
+        "url",
+        "subject",
+        "credits",
+        "metadata"
+      ],
+      "additionalProperties": false
+    },
+    "pr_merged_metadata": {
+      "type": "object",
+      "properties": {
+        "source_node_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "merge_commit_sha": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "source_node_id",
+        "merge_commit_sha"
+      ],
+      "additionalProperties": false
+    },
+    "pr_merged_activity": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "pr_merged"
+        },
+        "occurred_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "Z$"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uri",
+              "pattern": "^https://"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "subject": {
+          "$ref": "#/$defs/subject"
+        },
+        "credits": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/credit"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "metadata": {
+          "$ref": "#/$defs/pr_merged_metadata"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "occurred_at",
+        "url",
+        "subject",
+        "credits",
+        "metadata"
+      ],
+      "additionalProperties": false
+    },
+    "issue_opened_metadata": {
+      "type": "object",
+      "properties": {
+        "source_node_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "source_node_id"
+      ],
+      "additionalProperties": false
+    },
+    "issue_opened_activity": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "issue_opened"
+        },
+        "occurred_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "Z$"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uri",
+              "pattern": "^https://"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "subject": {
+          "$ref": "#/$defs/subject"
+        },
+        "credits": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/credit"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "metadata": {
+          "$ref": "#/$defs/issue_opened_metadata"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "occurred_at",
+        "url",
+        "subject",
+        "credits",
+        "metadata"
+      ],
+      "additionalProperties": false
+    },
+    "issue_closed_metadata": {
+      "type": "object",
+      "properties": {
+        "source_node_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "source_node_id",
+        "reason"
+      ],
+      "additionalProperties": false
+    },
+    "issue_closed_activity": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "issue_closed"
+        },
+        "occurred_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "Z$"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uri",
+              "pattern": "^https://"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "subject": {
+          "$ref": "#/$defs/subject"
+        },
+        "credits": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/credit"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "metadata": {
+          "$ref": "#/$defs/issue_closed_metadata"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "occurred_at",
+        "url",
+        "subject",
+        "credits",
+        "metadata"
+      ],
+      "additionalProperties": false
+    },
+    "issue_reopened_metadata": {
+      "type": "object",
+      "properties": {
+        "source_node_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "source_node_id"
+      ],
+      "additionalProperties": false
+    },
+    "issue_reopened_activity": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "issue_reopened"
+        },
+        "occurred_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "Z$"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uri",
+              "pattern": "^https://"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "subject": {
+          "$ref": "#/$defs/subject"
+        },
+        "credits": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/credit"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "metadata": {
+          "$ref": "#/$defs/issue_reopened_metadata"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "occurred_at",
+        "url",
+        "subject",
+        "credits",
+        "metadata"
+      ],
+      "additionalProperties": false
+    },
+    "issue_comment_metadata": {
+      "type": "object",
+      "properties": {
+        "source_node_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "source_node_id"
+      ],
+      "additionalProperties": false
+    },
+    "issue_comment_activity": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "issue_comment"
+        },
+        "occurred_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "Z$"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uri",
+              "pattern": "^https://"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "subject": {
+          "$ref": "#/$defs/subject"
+        },
+        "credits": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/credit"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "metadata": {
+          "$ref": "#/$defs/issue_comment_metadata"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "occurred_at",
+        "url",
+        "subject",
+        "credits",
+        "metadata"
+      ],
+      "additionalProperties": false
+    },
+    "pr_conversation_comment_metadata": {
+      "type": "object",
+      "properties": {
+        "source_node_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "source_node_id"
+      ],
+      "additionalProperties": false
+    },
+    "pr_conversation_comment_activity": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "pr_conversation_comment"
+        },
+        "occurred_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "Z$"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uri",
+              "pattern": "^https://"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "subject": {
+          "$ref": "#/$defs/subject"
+        },
+        "credits": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/credit"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "metadata": {
+          "$ref": "#/$defs/pr_conversation_comment_metadata"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "occurred_at",
+        "url",
+        "subject",
+        "credits",
+        "metadata"
+      ],
+      "additionalProperties": false
+    },
+    "pr_inline_review_comment_metadata": {
+      "type": "object",
+      "properties": {
+        "source_node_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "review_node_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "thread_node_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "Z$"
+        },
+        "published_at": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "Z$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "publication_confirmed": {
+          "type": "boolean"
+        },
+        "resolved": {
+          "type": "boolean"
+        },
+        "outdated": {
+          "type": "boolean"
+        },
+        "timestamp_fallback": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "source_node_id",
+        "review_node_id",
+        "thread_node_id",
+        "created_at",
+        "published_at",
+        "publication_confirmed",
+        "resolved",
+        "outdated",
+        "timestamp_fallback"
+      ],
+      "additionalProperties": false
+    },
+    "pr_inline_review_comment_activity": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "pr_inline_review_comment"
+        },
+        "occurred_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "Z$"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uri",
+              "pattern": "^https://"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "subject": {
+          "$ref": "#/$defs/subject"
+        },
+        "credits": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/credit"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "metadata": {
+          "$ref": "#/$defs/pr_inline_review_comment_metadata"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "occurred_at",
+        "url",
+        "subject",
+        "credits",
+        "metadata"
+      ],
+      "additionalProperties": false
+    },
+    "pr_review_metadata": {
+      "type": "object",
+      "properties": {
+        "source_node_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "submitted_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "Z$"
+        },
+        "state": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "source_node_id",
+        "submitted_at",
+        "state"
+      ],
+      "additionalProperties": false
+    },
+    "pr_review_activity": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "pr_review"
+        },
+        "occurred_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "Z$"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uri",
+              "pattern": "^https://"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "subject": {
+          "$ref": "#/$defs/subject"
+        },
+        "credits": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/credit"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "metadata": {
+          "$ref": "#/$defs/pr_review_metadata"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "occurred_at",
+        "url",
+        "subject",
+        "credits",
+        "metadata"
+      ],
+      "additionalProperties": false
+    },
+    "activity": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/commit_activity"
+        },
+        {
+          "$ref": "#/$defs/pr_opened_activity"
+        },
+        {
+          "$ref": "#/$defs/pr_merged_activity"
+        },
+        {
+          "$ref": "#/$defs/issue_opened_activity"
+        },
+        {
+          "$ref": "#/$defs/issue_closed_activity"
+        },
+        {
+          "$ref": "#/$defs/issue_reopened_activity"
+        },
+        {
+          "$ref": "#/$defs/issue_comment_activity"
+        },
+        {
+          "$ref": "#/$defs/pr_conversation_comment_activity"
+        },
+        {
+          "$ref": "#/$defs/pr_inline_review_comment_activity"
+        },
+        {
+          "$ref": "#/$defs/pr_review_activity"
+        }
+      ]
+    }
+  }
+}
