@@ -8,12 +8,31 @@ Requires Python 3.12+. Packaging and Pixi configuration are maintained together 
 `pyproject.toml`. Install with `pip install .`, or use the existing Pixi workspace:
 
 ```text
-pixi run -e dev test
-pixi run -e dev coverage
-pixi run -e dev lint
-pixi run -e dev format-check
-pixi run -e dev build
+pixi run -e dev python-test
+pixi run -e dev python-coverage
+pixi run -e dev python-lint
+pixi run -e dev python-format-check
+pixi run -e dev python-build
 ```
+
+CI runs on pushes and pull requests with separate Python (3.12–3.15) and
+Node (22, 24, 26) jobs. Each uses a locked Pixi environment on Linux. Python
+checks include lint, formatting, coverage, and source/wheel builds; the test suite
+also installs the built wheel in isolation. Node checks include formatting, unit
+tests, package builds, an npm package preview, and Chromium browser tests.
+
+Run the same checks locally from the repository root:
+
+```text
+pixi run -e py312 python-ci
+pixi run -e node22 node-install
+pixi run -e node22 node-ci
+pixi run -e node22 node-browser-install
+pixi run -e node22 node-test-browser
+```
+
+Use `py313`, `py314`, `py315`, `node24`, or `node26` to test another runtime.
+`node-browser-install` installs Chromium and its system dependencies on Linux.
 
 ## Writing reports and using the CLI
 
@@ -233,7 +252,7 @@ connections, reruns, and collection of a different month from the same source
 history. Run it with:
 
 ```text
-pixi run -e dev test tests/test_collection.py
+pixi run -e dev python-test tests/test_collection.py
 ```
 
 ## GitHub GraphQL foundation

@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python: "3.12"
+            environment: py312
+          - python: "3.13"
+            environment: py313
+          - python: "3.14"
+            environment: py314
+          - python: "3.15"
+            environment: py315
+    steps:
+      - uses: actions/checkout@v5
+      - uses: prefix-dev/setup-pixi@v0.11.0
+        with:
+          pixi-version: v0.76.2
+          environments: ${{ matrix.environment }}
+          locked: true
+          cache-key: pixi-${{ matrix.environment }}-
+      - name: Lint, format, test with coverage, and build distributions
+        run: pixi run --locked -e ${{ matrix.environment }} python-ci
+
+  node:
+    name: Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24, 26]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: prefix-dev/setup-pixi@v0.11.0
+        with:
+          pixi-version: v0.76.2
+          environments: node${{ matrix.node }}
+          locked: true
+          cache-key: pixi-node${{ matrix.node }}-
+      - name: Install npm dependencies
+        run: pixi run --locked -e node${{ matrix.node }} node-install
+      - name: Check formatting, unit tests, build, and package contents
+        run: pixi run --locked -e node${{ matrix.node }} node-ci
+      - name: Install Chromium and system dependencies
+        run: pixi run --locked -e node${{ matrix.node }} node-browser-install
+      - name: Run browser tests
+        run: pixi run --locked -e node${{ matrix.node }} node-test-browser

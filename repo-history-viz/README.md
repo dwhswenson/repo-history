@@ -123,6 +123,14 @@ Use **Download PNG** above the chart to save its current plot, axes, and legend 
 
 ## Development, builds, and distribution
 
+Requires Node 22+. From the repository root, use `pixi run -e node22 node-install`
+then `pixi run -e node22 node-ci` for formatting, unit tests, builds, and an npm
+package preview. Run `pixi run -e node22 node-browser-install` once, then
+`pixi run -e node22 node-test-browser` for Chromium tests. The `node24` and
+`node26` environments run the same tasks on those versions. CI runs all three.
+
+The equivalent npm commands inside `repo-history-viz` are:
+
 ```sh
 npm ci
 npm run dev           # Standalone demo using the component

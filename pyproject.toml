@@ -32,16 +32,48 @@ select = ["E4", "E7", "E9", "F", "I"]
 
 [tool.pixi.workspace]
 channels = ["conda-forge"]
-platforms = ["osx-64"]
+platforms = ["osx-64", "linux-64"]
 
 [tool.pixi.dependencies]
-python = ">=3.12,<3.13"
+python = ">=3.12"
 
 [tool.pixi.pypi-dependencies]
 repo-history = {path = ".", editable = true}
 
 [tool.pixi.feature.visualization.dependencies]
-nodejs = "*"
+nodejs = ">=22"
+
+[tool.pixi.feature.visualization.tasks]
+node-install = {cmd = "npm ci", cwd = "repo-history-viz"}
+node-test = {cmd = "npm test", cwd = "repo-history-viz"}
+node-format-check = {cmd = "npm run format:check", cwd = "repo-history-viz"}
+node-format = {cmd = "npm run format", cwd = "repo-history-viz"}
+node-build = {cmd = "npm run build", cwd = "repo-history-viz"}
+node-pack-check = {cmd = "npm pack --dry-run --ignore-scripts", cwd = "repo-history-viz", depends-on = ["node-build"]}
+node-browser-install = {cmd = "npx playwright install --with-deps chromium", cwd = "repo-history-viz"}
+node-test-browser = {cmd = "npm run test:browser", cwd = "repo-history-viz"}
+node-ci = {depends-on = ["node-format-check", "node-test", "node-pack-check"]}
+
+[tool.pixi.feature.py312.dependencies]
+python = "3.12.*"
+
+[tool.pixi.feature.py313.dependencies]
+python = "3.13.*"
+
+[tool.pixi.feature.py314.dependencies]
+python = "3.14.*"
+
+[tool.pixi.feature.py315.dependencies]
+python = "3.15.*"
+
+[tool.pixi.feature.node22.dependencies]
+nodejs = "22.*"
+
+[tool.pixi.feature.node24.dependencies]
+nodejs = "24.*"
+
+[tool.pixi.feature.node26.dependencies]
+nodejs = "26.*"
 
 [tool.pixi.feature.dev.dependencies]
 pytest = ">=8"
@@ -49,15 +81,24 @@ pytest-cov = "*"
 ruff = "*"
 python-build = "*"
 pip = "*"
+setuptools = ">=69"
 
 [tool.pixi.feature.dev.tasks]
-test = "pytest"
-coverage = "pytest --cov=repo_history --cov-report=term-missing"
-lint = "ruff check ."
-format-check = "ruff format --check ."
-format = "ruff format ."
-build = "python -m build"
+python-test = "pytest"
+python-coverage = "pytest --cov=repo_history --cov-report=term-missing --cov-report=xml"
+python-lint = "ruff check src tests"
+python-format-check = "ruff format --check src tests"
+python-format = "ruff format src tests"
+python-build = "python -m build --no-isolation"
+python-ci = {depends-on = ["python-lint", "python-format-check", "python-coverage", "python-build"]}
 
 [tool.pixi.environments]
-dev = {features = ["dev", "visualization"], solve-group = "default"}
-default = {solve-group = "default"}
+dev = {features = ["dev", "py312", "visualization"], solve-group = "default"}
+default = {features = ["py312"], solve-group = "default"}
+py312 = {features = ["dev", "py312"], solve-group = "default"}
+py313 = {features = ["dev", "py313"]}
+py314 = {features = ["dev", "py314"]}
+py315 = {features = ["dev", "py315"]}
+node22 = {features = ["visualization", "node22"], no-default-feature = true}
+node24 = {features = ["visualization", "node24"], no-default-feature = true}
+node26 = {features = ["visualization", "node26"], no-default-feature = true}
