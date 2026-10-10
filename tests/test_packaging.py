@@ -10,7 +10,7 @@ from pathlib import Path
 from build import ProjectBuilder
 
 ROOT = Path(__file__).resolve().parents[1]
-SCHEMA = "repo_history_tracking/schemas/monthly-report-v1.json"
+SCHEMA = "repo_history/schemas/monthly-report-v1.json"
 
 
 def test_distributions_and_isolated_wheel_install(tmp_path):
@@ -63,10 +63,10 @@ def test_distributions_and_isolated_wheel_install(tmp_path):
 import json
 import sys
 from pathlib import Path
-import repo_history_tracking as r
+import repo_history as r
 assert Path(r.__file__).is_relative_to(Path(sys.prefix)), r.__file__
 assert r.load_schema()['$id'] == 'urn:repo-history-tracking:monthly-report:1'
-from repo_history_tracking.queries import REPOSITORY_QUERY, PAGE_INFO_FRAGMENT
+from repo_history.queries import REPOSITORY_QUERY, PAGE_INFO_FRAGMENT
 assert 'query RepositoryLookup' in REPOSITORY_QUERY
 assert 'endCursor' in PAGE_INFO_FRAGMENT
 for name in ('collect_month', 'GraphQLClient', 'resolve_token', 'RepositorySnapshot',
@@ -89,8 +89,8 @@ for text in json.load(sys.stdin):
     )
     assert result.returncode == 0
     for command in (
-        [str(environment / "bin" / "repo-history-tracking")],
-        [str(python), "-I", "-m", "repo_history_tracking"],
+        [str(environment / "bin" / "repo-history")],
+        [str(python), "-I", "-m", "repo_history"],
     ):
         for arguments in (["--help"], ["backfill", "--help"]):
             result = subprocess.run(

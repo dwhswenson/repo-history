@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from repo_history_tracking import (
+from repo_history import (
     ReportValidationError,
     ReportWriteError,
     report_from_json,

@@ -1,6 +1,6 @@
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
-import schema from "../../src/repo_history_tracking/schemas/monthly-report-v1.json" with { type: "json" };
+import schema from "../../src/repo_history/schemas/monthly-report-v1.json" with { type: "json" };
 
 export const ACTIVITY_LABELS = {
   commit: "Commits",

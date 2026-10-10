@@ -1,6 +1,6 @@
 """Tests for the reusable GraphQL query documents and fragments."""
 
-from repo_history_tracking.queries import PAGE_INFO_FRAGMENT, REPOSITORY_QUERY
+from repo_history.queries import PAGE_INFO_FRAGMENT, REPOSITORY_QUERY
 
 
 def test_repository_query_and_reusable_fragments():
@@ -13,7 +13,7 @@ def test_repository_query_and_reusable_fragments():
 
 
 def test_lifecycle_queries_use_node_variables_and_independent_connections():
-    from repo_history_tracking.queries import (
+    from repo_history.queries import (
         ISSUE_TIMELINE_QUERY,
         ISSUES_QUERY,
         PR_TIMELINE_QUERY,
@@ -46,7 +46,7 @@ def test_lifecycle_queries_use_node_variables_and_independent_connections():
 
 
 def test_comment_and_review_queries_paginate_one_connection_without_bodies():
-    from repo_history_tracking.queries import (
+    from repo_history.queries import (
         ISSUE_COMMENTS_QUERY,
         PR_COMMENTS_QUERY,
         PR_REVIEWS_QUERY,

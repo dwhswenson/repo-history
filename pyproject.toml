@@ -3,7 +3,7 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "repo-history-tracking"
+name = "repo-history"
 version = "0.1.0"
 description = "Normalized monthly GitHub repository activity reports"
 readme = "README.md"
@@ -12,13 +12,13 @@ dependencies = ["jsonschema[format]>=4.18,<5", "requests>=2.32,<3"]
 authors = [{name = "David W.H. Swenson", email = "david.swenson@omsf.io"}]
 
 [project.scripts]
-repo-history-tracking = "repo_history_tracking.cli:main"
+repo-history = "repo_history.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-repo_history_tracking = ["schemas/*.json", "py.typed"]
+repo_history = ["schemas/*.json", "py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -38,7 +38,7 @@ platforms = ["osx-64"]
 python = ">=3.12,<3.13"
 
 [tool.pixi.pypi-dependencies]
-repo-history-tracking = {path = ".", editable = true}
+repo-history = {path = ".", editable = true}
 
 [tool.pixi.feature.visualization.dependencies]
 nodejs = "*"
@@ -52,7 +52,7 @@ pip = "*"
 
 [tool.pixi.feature.dev.tasks]
 test = "pytest"
-coverage = "pytest --cov=repo_history_tracking --cov-report=term-missing"
+coverage = "pytest --cov=repo_history --cov-report=term-missing"
 lint = "ruff check ."
 format-check = "ruff format --check ."
 format = "ruff format ."

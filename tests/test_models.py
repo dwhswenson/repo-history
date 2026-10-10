@@ -1,10 +1,10 @@
-"""Tests for repo_history_tracking.models."""
+"""Tests for repo_history.models."""
 
 from pathlib import Path
 
 import pytest
 
-from repo_history_tracking import (
+from repo_history import (
     ACTIVITY_TYPES,
     build_report,
     report_from_json,

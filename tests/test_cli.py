@@ -7,15 +7,15 @@ from datetime import datetime, timezone
 
 import pytest
 
-from repo_history_tracking import (
+from repo_history import (
     AuthenticationError,
     RateLimitError,
     ReportWriteError,
     cli,
 )
-from repo_history_tracking.collection import _month_bounds
+from repo_history.collection import _month_bounds
 
-backfill_module = importlib.import_module("repo_history_tracking.backfill")
+backfill_module = importlib.import_module("repo_history.backfill")
 
 
 @pytest.fixture
@@ -25,10 +25,10 @@ def collector(monkeypatch, empty):
     def collect(owner, repo, year, month, **kwargs):
         calls.append((owner, repo, year, month, kwargs))
         start, end = _month_bounds(year, month)
-        logging.getLogger("repo_history_tracking.collection").info(
+        logging.getLogger("repo_history.collection").info(
             "GitHub API usage status=completed"
         )
-        logging.getLogger("repo_history_tracking.collection").debug("debug details")
+        logging.getLogger("repo_history.collection").debug("debug details")
         return replace(
             empty,
             metadata=replace(
@@ -213,7 +213,7 @@ def test_bad_directory_prevents_collection(tmp_path, collector, capsys):
 
 
 def test_logging_configuration_restored(tmp_path, collector):
-    logger = logging.getLogger("repo_history_tracking")
+    logger = logging.getLogger("repo_history")
     original = logger.level, logger.propagate, logger.handlers[:]
     assert (
         cli.main(["o/r", "--month", "2024-02", "--output-directory", str(tmp_path)])

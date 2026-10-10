@@ -787,7 +787,7 @@ packages:
   size: 528228
   timestamp: 1786599702092
 - pypi: ./
-  name: repo-history-tracking
+  name: repo-history
   requires_dist:
   - jsonschema[format]>=4.18,<5
   - requests>=2.32,<3

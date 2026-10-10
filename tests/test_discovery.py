@@ -6,9 +6,9 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
-import repo_history_tracking as api
-from repo_history_tracking import collection
-from repo_history_tracking.queries import parent_hydration_query
+import repo_history as api
+from repo_history import collection
+from repo_history.queries import parent_hydration_query
 
 from .helpers import Response, Session, empty_commits, errors, repository
 from .test_collection import (
@@ -25,7 +25,7 @@ from .test_collection import (
 
 @pytest.fixture(autouse=True)
 def isolate_commits(monkeypatch):
-    monkeypatch.setattr("repo_history_tracking.commits.collect_commits", empty_commits)
+    monkeypatch.setattr("repo_history.commits.collect_commits", empty_commits)
 
 
 NOW = datetime(2024, 4, 15, tzinfo=timezone.utc)
@@ -308,7 +308,7 @@ def test_late_rest_failure_does_not_hydrate_or_fallback(session):
 
 
 def test_earliest_month_selects_full_before_discovery(session, caplog):
-    caplog.set_level("INFO", logger="repo_history_tracking.discovery")
+    caplog.set_level("INFO", logger="repo_history.discovery")
     session.responses = [repository(), connection("pullRequests")]
     report = api.collect_month("o", "r", 1, 1, token="test", discovery="bounded")
     assert report.metadata.month == "0001-01"

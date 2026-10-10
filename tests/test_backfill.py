@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from repo_history_tracking import (
+from repo_history import (
     GraphQLError,
     ReportWriteError,
     RepositoryUnavailableError,
@@ -14,11 +14,11 @@ from repo_history_tracking import (
     report_from_json,
     report_to_json,
 )
-from repo_history_tracking.collection import _month_bounds
+from repo_history.collection import _month_bounds
 
 from .helpers import Response
 
-module = importlib.import_module("repo_history_tracking.backfill")
+module = importlib.import_module("repo_history.backfill")
 
 
 @pytest.fixture

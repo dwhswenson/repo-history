@@ -5,7 +5,7 @@ from copy import deepcopy
 
 def empty_commits(client, repository, start, end, records):
     """Isolate lifecycle/discovery suites; commit integration has its own suite."""
-    from repo_history_tracking.commits import history_bounds
+    from repo_history.commits import history_bounds
 
     strategy, _ = history_bounds(start, end)
     return strategy

@@ -5,15 +5,15 @@ from datetime import datetime, timezone
 
 import pytest
 
-import repo_history_tracking as api
-from repo_history_tracking import collection
+import repo_history as api
+from repo_history import collection
 
 from .helpers import Response, Session, empty_commits, errors, repository
 
 
 @pytest.fixture(autouse=True)
 def isolate_commits(monkeypatch):
-    monkeypatch.setattr("repo_history_tracking.commits.collect_commits", empty_commits)
+    monkeypatch.setattr("repo_history.commits.collect_commits", empty_commits)
 
 
 NOW = datetime(2024, 4, 15, tzinfo=timezone.utc)
@@ -897,9 +897,7 @@ def test_late_thread_comment_failure(session, tail):
 
 
 def test_nested_comment_page_reduction(session, monkeypatch):
-    monkeypatch.setattr(
-        "repo_history_tracking.transport.time.sleep", lambda *args: None
-    )
+    monkeypatch.setattr("repo_history.transport.time.sleep", lambda *args: None)
     report = collect(
         session,
         pr_history(

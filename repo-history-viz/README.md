@@ -1,6 +1,6 @@
 # Repository history visualization
 
-`<repo-history-viz>` is a framework-independent Web Component for monthly v1 JSON reports produced by `repo-history-tracking`. It includes activity comparisons, monthly bars, cumulative lines, unique contributor counts, month-range controls, and CSV data downloads. Chart.js, validation schema, and styles are bundled. No backend or GitHub credentials are needed.
+`<repo-history-viz>` is a framework-independent Web Component for monthly v1 JSON reports produced by `repo-history`. It includes activity comparisons, monthly bars, cumulative lines, unique contributor counts, month-range controls, and CSV data downloads. Chart.js, validation schema, and styles are bundled. No backend or GitHub credentials are needed.
 
 ## Use in any static site
 

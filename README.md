@@ -20,10 +20,10 @@ pixi run -e dev build
 Set `GH_TOKEN` or `GITHUB_TOKEN` before collecting. After installation, use:
 
 ```text
-repo-history-tracking example/project --month 2024-02 --output-directory reports
-repo-history-tracking example/project --output-directory reports
-repo-history-tracking backfill example/project --start 2024-01 --end 2024-12 --output-directory reports
-repo-history-tracking backfill example/project --output-directory reports
+repo-history example/project --month 2024-02 --output-directory reports
+repo-history example/project --output-directory reports
+repo-history backfill example/project --start 2024-01 --end 2024-12 --output-directory reports
+repo-history backfill example/project --output-directory reports
 ```
 
 The output directory is required and is created if missing. Omitting `--month`
@@ -34,9 +34,9 @@ UTC month, including empty months. Either endpoint can be supplied independently
 Imported commits older than repository creation require an explicit earlier start.
 Both commands accept `--discovery full|bounded`; bounded is the default and remains
 experimental. Use `--discovery full` for reference traversal.
-`python -m repo_history_tracking` supports the same commands.
+`python -m repo_history` supports the same commands.
 With Pixi, prefix commands with `pixi run`, for example
-`pixi run repo-history-tracking --help`.
+`pixi run repo-history --help`.
 
 Each successful month prints its saved path to stdout immediately. Progress and
 API usage go to stderr. `--verbose` includes debug diagnostics; `--quiet` suppresses
@@ -47,7 +47,7 @@ Rate-limit errors include available retry/reset guidance and stop the run.
 Python callers can collect without writing, write an existing report, or backfill:
 
 ```python
-from repo_history_tracking import backfill, collect_month, write_report
+from repo_history import backfill, collect_month, write_report
 
 report = collect_month("example", "project", 2024, 2)
 path = write_report(report, "reports")  # pathlib.Path: reports/2024-02.json
@@ -85,7 +85,7 @@ does not provide power-loss durability or a transactional multi-month backfill.
 
 Test suites mirror source module names with a `test_` prefix: for example,
 `tests/test_queries.py` tests
-`src/repo_history_tracking/queries.py`. Shared fixtures and response builders live
+`src/repo_history/queries.py`. Shared fixtures and response builders live
 in `tests/conftest.py` and `tests/helpers.py`; `tests/test_packaging.py` covers
 distribution integration. Pytest uses standard test filename discovery under
 `tests`, with importlib mode.
@@ -93,7 +93,7 @@ distribution integration. Pytest uses standard test filename discovery under
 ## Monthly activity collection
 
 ```python
-from repo_history_tracking import collect_month, report_to_json, validate_report
+from repo_history import collect_month, report_to_json, validate_report
 
 # Uses GH_TOKEN, falling back to GITHUB_TOKEN; token="..." is also supported.
 report = collect_month("example", "project", 2024, 2)
@@ -243,7 +243,7 @@ Blank environment values are ignored; an explicit blank token is an error.
 The client supports repositories on GitHub.com accessible to that credential.
 
 ```python
-from repo_history_tracking import GraphQLClient, lookup_repository
+from repo_history import GraphQLClient, lookup_repository
 
 with GraphQLClient() as client:
     repository = lookup_repository(client, "example", "project")
@@ -334,7 +334,7 @@ handlers and excludes credentials, query variables, and response bodies.
 
 ```python
 from datetime import datetime, timezone
-from repo_history_tracking import ReportMetadata, build_report, report_to_json
+from repo_history import ReportMetadata, build_report, report_to_json
 
 metadata = ReportMetadata(
     repository_node_id="R_example",
@@ -364,7 +364,7 @@ mappings are ordinary dictionaries; revalidate a report after modifying them.
 ## JSON contract version 1
 
 The authoritative Draft 2020-12 schema is packaged at
-`repo_history_tracking/schemas/monthly-report-v1.json` and available via
+`repo_history/schemas/monthly-report-v1.json` and available via
 `load_schema()`. JSON has five required sections: `schema_version` (`"1"`),
 `metadata`, `actors`, `activities`, and `summaries`. Unknown structural fields,
 activity types, roles, and versions are rejected. GitHub reason/state strings and

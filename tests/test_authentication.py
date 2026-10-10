@@ -1,8 +1,8 @@
-"""Tests for repo_history_tracking.authentication."""
+"""Tests for repo_history.authentication."""
 
 import pytest
 
-import repo_history_tracking as api
+import repo_history as api
 
 
 def test_authentication(monkeypatch):

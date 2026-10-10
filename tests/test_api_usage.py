@@ -5,9 +5,9 @@ import logging
 import pytest
 import requests
 
-import repo_history_tracking as api
-from repo_history_tracking import collection
-from repo_history_tracking.queries import parent_hydration_query
+import repo_history as api
+from repo_history import collection
+from repo_history.queries import parent_hydration_query
 
 from .helpers import Response, Session, empty_commits, errors, repository
 from .test_collection import NOW, connection, parent
@@ -16,7 +16,7 @@ from .test_discovery import hydrated, rest_parent
 
 @pytest.fixture(autouse=True)
 def isolate_commits(monkeypatch):
-    monkeypatch.setattr("repo_history_tracking.commits.collect_commits", empty_commits)
+    monkeypatch.setattr("repo_history.commits.collect_commits", empty_commits)
 
 
 def cost(response, points):
@@ -31,15 +31,13 @@ def session(monkeypatch, caplog):
     result = Session()
     monkeypatch.setattr("requests.Session", lambda: result)
     monkeypatch.setattr(collection, "_utc_now", lambda: NOW)
-    monkeypatch.setattr("repo_history_tracking.transport.time.sleep", lambda _: None)
-    caplog.set_level(logging.INFO, logger="repo_history_tracking.collection")
+    monkeypatch.setattr("repo_history.transport.time.sleep", lambda _: None)
+    caplog.set_level(logging.INFO, logger="repo_history.collection")
     return result
 
 
 def summary(caplog):
-    records = [
-        r for r in caplog.records if r.name == "repo_history_tracking.collection"
-    ]
+    records = [r for r in caplog.records if r.name == "repo_history.collection"]
     assert len(records) == 1
     return records[0].getMessage()
 
@@ -142,7 +140,7 @@ def test_usage_starts_fresh_for_each_collection(session, caplog):
 
 
 def test_collector_queries_all_request_primary_cost():
-    from repo_history_tracking import queries
+    from repo_history import queries
 
     documents = [
         getattr(queries, name) for name in dir(queries) if name.endswith("_QUERY")

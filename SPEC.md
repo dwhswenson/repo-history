@@ -11,7 +11,7 @@ collect_month(owner, repo, year, month, *, token=None, discovery="bounded") -> M
 ```
 
 ```text
-repo-history-tracking OWNER/REPO --month YYYY-MM --output-directory PATH
+repo-history OWNER/REPO --month YYYY-MM --output-directory PATH
 ```
 
 Omitting `--month` selects the current UTC month. A separate `backfill` command accepts optional inclusive starting and ending months and invokes the same monthly operation. Omitted start uses the repository creation month; omitted end uses the current UTC month. Either endpoint can be set independently. Include empty months; imported commits predating repository creation require an explicit earlier start.

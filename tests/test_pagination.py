@@ -1,9 +1,9 @@
-"""Tests for repo_history_tracking.pagination."""
+"""Tests for repo_history.pagination."""
 
 import pytest
 import requests
 
-import repo_history_tracking as api
+import repo_history as api
 
 from .helpers import Response, errors, iterate, page
 

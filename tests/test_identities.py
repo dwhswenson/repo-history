@@ -1,4 +1,4 @@
-"""Tests for repo_history_tracking.identities."""
+"""Tests for repo_history.identities."""
 
 from dataclasses import replace
 from hashlib import sha256
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from repo_history_tracking import (
+from repo_history import (
     build_report,
     git_identity_key,
     unresolved_git_actor,

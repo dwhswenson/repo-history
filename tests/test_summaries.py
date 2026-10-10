@@ -1,9 +1,9 @@
-"""Tests for repo_history_tracking.summaries."""
+"""Tests for repo_history.summaries."""
 
 from dataclasses import replace
 from pathlib import Path
 
-from repo_history_tracking import (
+from repo_history import (
     Actor,
     build_report,
     validate_report,

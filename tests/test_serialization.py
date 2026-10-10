@@ -1,4 +1,4 @@
-"""Tests for repo_history_tracking.serialization."""
+"""Tests for repo_history.serialization."""
 
 import json
 from dataclasses import replace
@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from jsonschema import Draft202012Validator, FormatChecker
 
-from repo_history_tracking import (
+from repo_history import (
     ReportValidationError,
     build_report,
     load_schema,

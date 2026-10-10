@@ -1,9 +1,9 @@
-"""Tests for repo_history_tracking.repository."""
+"""Tests for repo_history.repository."""
 
 import pytest
 
-import repo_history_tracking as api
-from repo_history_tracking.queries import REPOSITORY_QUERY
+import repo_history as api
+from repo_history.queries import REPOSITORY_QUERY
 
 from .helpers import Response, repository
 

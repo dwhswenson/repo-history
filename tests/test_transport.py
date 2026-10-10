@@ -1,4 +1,4 @@
-"""Tests for repo_history_tracking.transport."""
+"""Tests for repo_history.transport."""
 
 from datetime import datetime, timezone
 from email.utils import format_datetime
@@ -6,7 +6,7 @@ from email.utils import format_datetime
 import pytest
 import requests
 
-import repo_history_tracking as api
+import repo_history as api
 
 from .helpers import Response, errors, execute
 
@@ -85,7 +85,7 @@ def test_invalid_configuration(kwargs):
     ],
 )
 def test_nonretryable_errors(client, response, error, caplog):
-    caplog.set_level("DEBUG", logger="repo_history_tracking.transport")
+    caplog.set_level("DEBUG", logger="repo_history.transport")
     client._session.responses = [response]
     with pytest.raises(error) as exc:
         execute(client)

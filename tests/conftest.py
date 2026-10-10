@@ -4,8 +4,8 @@ from pathlib import Path
 import pytest
 import requests
 
-import repo_history_tracking as api
-from repo_history_tracking import report_from_json
+import repo_history as api
+from repo_history import report_from_json
 
 from .helpers import Session
 

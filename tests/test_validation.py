@@ -1,4 +1,4 @@
-"""Tests for repo_history_tracking.validation."""
+"""Tests for repo_history.validation."""
 
 import json
 from dataclasses import replace
@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from jsonschema import Draft202012Validator
 
-from repo_history_tracking import (
+from repo_history import (
     ACTIVITY_TYPES,
     Actor,
     Credit,

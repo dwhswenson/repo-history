@@ -6,10 +6,10 @@ from datetime import datetime, timezone
 
 import pytest
 
-import repo_history_tracking as api
-from repo_history_tracking import collection
-from repo_history_tracking.commits import history_bounds
-from repo_history_tracking.identities import git_identity_key
+import repo_history as api
+from repo_history import collection
+from repo_history.commits import history_bounds
+from repo_history.identities import git_identity_key
 
 from .helpers import Response, Session, errors, repository
 from .test_collection import NOW, actor, connection, parent
@@ -357,7 +357,7 @@ def test_small_inversion_is_recovered_and_large_inversion_is_disclosed(session):
 
 
 def test_combined_pr_and_commit_counts_and_api_cost(session, caplog):
-    caplog.set_level("INFO", logger="repo_history_tracking.collection")
+    caplog.set_level("INFO", logger="repo_history.collection")
     responses = [
         repository(),
         connection("pullRequests", [parent(date="2024-02-02T00:00:00Z")]),
@@ -385,7 +385,7 @@ def test_invalid_provenance_rejected(mixed, strategy):
 
 
 def test_commit_queries_are_anchored_and_only_fetch_headlines():
-    from repo_history_tracking.queries import COMMIT_HISTORY_QUERY
+    from repo_history.queries import COMMIT_HISTORY_QUERY
 
     assert "object(oid: $head)" in COMMIT_HISTORY_QUERY
     assert "defaultBranchRef" not in COMMIT_HISTORY_QUERY

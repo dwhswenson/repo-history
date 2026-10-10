@@ -7,8 +7,8 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 import requests
 
-import repo_history_tracking as api
-from repo_history_tracking.rest_pagination import iter_rest_list
+import repo_history as api
+from repo_history.rest_pagination import iter_rest_list
 
 from .helpers import Response, execute
 
@@ -85,7 +85,7 @@ def test_rest_retry_exhaustion(client):
     ],
 )
 def test_rest_permanent_failures(client, response, error, caplog):
-    caplog.set_level("DEBUG", logger="repo_history_tracking.transport")
+    caplog.set_level("DEBUG", logger="repo_history.transport")
     client._session.responses = [response]
     with pytest.raises(error) as exc:
         fetch(client)
