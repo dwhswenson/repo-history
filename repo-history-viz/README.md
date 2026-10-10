@@ -151,8 +151,12 @@ Build outputs:
 
 `npm pack` includes only `dist/`, documentation, examples, and npm metadata. Install the tarball into a consuming project with `npm install /path/to/repo-history-viz-0.1.0.tgz`. Consumers do not need this repository or the Python package. Source builds use the canonical schema from the sibling Python package.
 
-The package is prepared for npm publication but is not published automatically. Before a registry release, confirm the package name/version and license with the project owner, run the checks above, inspect `npm pack --dry-run`, then publish through the project's release process.
+The package is prepared for npm publication but is not published automatically. Before a registry release, confirm the package name/version with the project owner, run the checks above, inspect `npm pack --dry-run`, then publish through the project's release process.
 
 Browser tests cover file and manifest loading, chart controls, range validation, mobile layout, isolated instances, disconnect/reconnect, changing manifests, events, and the built standalone bundle. Browser tests build the package automatically before exercising packaged assets. Set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to reuse an existing Chromium executable. Browser output is ignored under `test-results/`.
 
 GitHub Activities supports the same identity filter defaults as contributor counts: humans and undetermined actors included, known bots excluded. Events are classified by their credited performer (including the closer or merger), with missing actors counted as Undetermined. The filter applies to monthly and cumulative charts and their downloads. Commit counts and issue / PR balance are unaffected.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

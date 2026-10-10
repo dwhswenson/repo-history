@@ -1,6 +1,7 @@
 {
   "name": "repo-history-viz",
   "version": "0.1.0",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -42,6 +43,7 @@
   },
   "files": [
     "dist",
+    "LICENSE",
     "README.md",
     "examples"
   ],

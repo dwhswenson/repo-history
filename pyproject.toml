@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=69"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,6 +7,8 @@ name = "repo-history"
 version = "0.1.0"
 description = "Normalized monthly GitHub repository activity reports"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = ["jsonschema[format]>=4.18,<5", "requests>=2.32,<3"]
 authors = [{name = "David W.H. Swenson", email = "david.swenson@omsf.io"}]
@@ -81,7 +83,7 @@ pytest-cov = "*"
 ruff = "*"
 python-build = "*"
 pip = "*"
-setuptools = ">=69"
+setuptools = ">=77"
 
 [tool.pixi.feature.dev.tasks]
 python-test = "pytest"

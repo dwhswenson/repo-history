@@ -455,3 +455,7 @@ branches, and newly available data can revise rerun results. Collection is not a
 transactional snapshot; concurrent changes may appear on a later rerun.
 Disabled issues do not prevent later PR collection. Record applicable limitations
 in `metadata.coverage_limitations`.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
