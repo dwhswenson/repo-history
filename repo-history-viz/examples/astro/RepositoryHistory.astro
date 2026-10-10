@@ -1,0 +1,12 @@
+---
+interface Props {
+  manifest: string;
+}
+const { manifest } = Astro.props;
+---
+
+<repo-history-viz manifest={manifest} hide-loader></repo-history-viz>
+
+<script>
+  import "repo-history-viz/register";
+</script>

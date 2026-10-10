@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Repository history embed</title>
+    <!-- Copy dist/repo-history-viz.js next to this file. -->
+    <script type="module" src="./repo-history-viz.js"></script>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 2rem auto; max-width: 1200px; }
+      repo-history-viz { --repo-history-accent: #0f766e; --repo-history-radius: 8px; }
+    </style>
+  </head>
+  <body>
+    <h1>Project activity</h1>
+    <repo-history-viz manifest="./reports/manifest.json" hide-loader></repo-history-viz>
+  </body>
+</html>
