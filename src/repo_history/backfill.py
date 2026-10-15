@@ -1,4 +1,4 @@
-"""Chronological monthly collection and writing without rollback or caching."""
+"""History-first backfill, with optional independent monthly collection."""
 
 import logging
 import os
@@ -6,12 +6,14 @@ import re
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
+from time import perf_counter
 
 from .collection import _month_bounds, collect_month
 from .errors import GraphQLError, ReportWriteError, RepositoryUnavailableError
+from .history import _collect_history, history_to_months
 from .queries import BACKFILL_REPOSITORY_QUERY
 from .transport import GraphQLClient
-from .writing import _check_directory, write_report
+from .writing import _check_directory, _write_report
 
 LOG = logging.getLogger(__name__)
 
@@ -28,14 +30,22 @@ def _parse_month(value: str) -> tuple[int, int]:
     return year, month
 
 
-def _validate_request(owner: str, repo: str, discovery: str) -> None:
+def _validate_request(
+    owner: str, repo: str, discovery: str | None, mode="history"
+) -> None:
     if any(
         not isinstance(value, str) or not value.strip() or "/" in value
         for value in (owner, repo)
     ):
         raise ValueError("owner and repo must be nonempty names without slashes")
-    if discovery not in ("full", "bounded"):
+    if mode not in ("history", "monthly"):
+        raise ValueError("mode must be history or monthly")
+    if discovery not in (None, "full", "bounded"):
         raise ValueError("discovery must be full or bounded")
+    if mode == "history" and discovery is not None:
+        raise ValueError(
+            "discovery applies only to monthly mode; select mode='monthly' (--mode monthly)"
+        )
 
 
 def _validate_range(start: str, end: str, now: datetime) -> tuple[int, int]:
@@ -95,14 +105,45 @@ def _run_backfill(
     *,
     output_directory: str | os.PathLike,
     token: str | None = None,
-    discovery: str = "bounded",
+    discovery: str | None = None,
+    mode: str = "history",
     on_written: Callable[[Path], None] | None = None,
     now: datetime | None = None,
 ) -> list[Path]:
-    _validate_request(owner, repo, discovery)
+    _validate_request(owner, repo, discovery, mode)
     now = _utc_now() if now is None else now
     end = _validate_optional_range(start, end, now)
     repository_id = _check_directory(Path(output_directory))
+    if mode == "history":
+        history = _collect_history(
+            owner, repo, token=token, expected_repository_id=repository_id, started=now
+        )
+        timer = perf_counter()
+        completed = False
+        paths = []
+        try:
+            reports = history_to_months(history, start, end)
+            # All selected reports have been validated before any replacement.
+            LOG.info(
+                "History grouped months=%s elapsed_seconds=%.3f",
+                len(reports),
+                perf_counter() - timer,
+            )
+            for report in reports:
+                path = _write_report(report, output_directory)
+                paths.append(path)
+                if on_written is not None:
+                    on_written(path)
+            completed = True
+            return paths
+        finally:
+            LOG.info(
+                "History grouping/writing status=%s saved_months=%s elapsed_seconds=%.3f",
+                "completed" if completed else "failed",
+                len(paths),
+                perf_counter() - timer,
+            )
+    discovery = "bounded" if discovery is None else discovery
     if start is None:
         observed, start = _lookup_start(owner, repo, token)
         if repository_id is not None and repository_id != observed:
@@ -126,7 +167,7 @@ def _run_backfill(
                 "report belongs to a different repository"
             )
         repository_id = observed
-        path = write_report(report, output_directory)
+        path = _write_report(report, output_directory)
         paths.append(path)
         if on_written is not None:
             on_written(path)
@@ -142,13 +183,18 @@ def backfill(
     *,
     output_directory: str | os.PathLike,
     token: str | None = None,
-    discovery: str = "bounded",
+    discovery: str | None = None,
+    mode: str = "history",
 ) -> list[Path]:
     """Collect and replace each month in an inclusive YYYY-MM range.
 
-    Omitted start uses the repository's creation month; omitted end uses the
-    current UTC month at invocation. Imported commits before creation require
-    an explicit earlier start. Discovery defaults to bounded.
+    History mode (default) collects once, then groups offline. Omitted start
+    includes activity before repository creation; omitted end uses the current
+    UTC month at invocation. All selected reports validate before writing.
+
+    Monthly mode preserves independent collection, defaults to bounded discovery,
+    and starts at repository creation unless an explicit start is supplied.
+    Explicit discovery is only accepted with mode="monthly".
 
     Return saved paths chronologically. The first error propagates; previously
     saved months remain usable. Existing monthly files must all be valid and
@@ -163,4 +209,5 @@ def backfill(
         output_directory=output_directory,
         token=token,
         discovery=discovery,
+        mode=mode,
     )

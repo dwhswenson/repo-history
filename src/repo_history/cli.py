@@ -11,6 +11,7 @@ from .backfill import (
     _run_backfill,
     _validate_optional_range,
     _validate_range,
+    _validate_request,
 )
 from .collection import collect_month
 from .errors import GitHubAPIError, RateLimitError
@@ -42,10 +43,18 @@ def _parser(backfilling: bool) -> argparse.ArgumentParser:
     parser.add_argument("repository", type=_repository, metavar="OWNER/REPO")
     if backfilling:
         parser.add_argument(
-            "--start", metavar="YYYY-MM", help="default: repository creation month"
+            "--start",
+            metavar="YYYY-MM",
+            help="default: earliest history (creation month in monthly mode)",
         )
         parser.add_argument(
             "--end", metavar="YYYY-MM", help="default: current UTC month"
+        )
+        parser.add_argument(
+            "--mode",
+            choices=("history", "monthly"),
+            default="history",
+            help="collect history once or collect each month independently (default: history)",
         )
     else:
         parser.add_argument(
@@ -55,8 +64,12 @@ def _parser(backfilling: bool) -> argparse.ArgumentParser:
     parser.add_argument(
         "--discovery",
         choices=("full", "bounded"),
-        default="bounded",
-        help="parent discovery strategy; bounded is experimental (default: bounded)",
+        default=None if backfilling else "bounded",
+        help=(
+            "monthly mode only; default there: bounded (experimental)"
+            if backfilling
+            else "parent discovery strategy; bounded is experimental (default: bounded)"
+        ),
     )
     verbosity = parser.add_mutually_exclusive_group()
     verbosity.add_argument(
@@ -76,6 +89,7 @@ def main(argv: list[str] | None = None) -> int:
     now = _utc_now()
     try:
         if backfilling:
+            _validate_request(*args.repository, args.discovery, args.mode)
             _validate_optional_range(args.start, args.end, now)
         else:
             if args.month is None:
@@ -110,6 +124,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.end,
                 output_directory=args.output_directory,
                 discovery=args.discovery,
+                mode=args.mode,
                 on_written=saved,
                 now=now,
             )

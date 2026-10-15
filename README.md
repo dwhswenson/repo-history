@@ -47,18 +47,28 @@ repo-history backfill example/project --output-directory reports
 
 The output directory is required and is created if missing. Omitting `--month`
 selects the current **UTC** month at invocation. Future months are rejected.
-Backfill includes both endpoints and collects months chronologically. Omit
-`--start` to begin at repository creation, and `--end` to finish at the current
-UTC month, including empty months. Either endpoint can be supplied independently.
-Imported commits older than repository creation require an explicit earlier start.
-Both commands accept `--discovery full|bounded`; bounded is the default and remains
-experimental. Use `--discovery full` for reference traversal.
+Backfill includes both endpoints and defaults to collecting all history once,
+then grouping it into monthly reports offline. Omit `--start` to begin at the
+earlier of repository creation and the earliest observed activity, including
+imported commits; omit `--end` to finish at the current UTC month. Empty months
+are included. Explicit ranges limit output, not the history traversal.
+
+Use `backfill --mode monthly` for independent monthly runs. In that mode the
+default start is repository creation, and `--discovery full|bounded` selects
+parent discovery (default: bounded, experimental). A single-month command also
+accepts `--discovery`; history-mode backfills reject it with guidance to select
+monthly mode. For example:
+
+```text
+repo-history backfill example/project --mode monthly --discovery full --start 2024-01 --end 2024-12 --output-directory reports
+```
 `python -m repo_history` supports the same commands.
 With Pixi, prefix commands with `pixi run`, for example
 `pixi run repo-history --help`.
 
 Each successful month prints its saved path to stdout immediately. Progress and
-API usage go to stderr. `--verbose` includes debug diagnostics; `--quiet` suppresses
+API usage go to stderr. `--verbose` includes debug diagnostics with `issue=N` or
+`pr=N` on relevant nested requests and retries; `--quiet` suppresses
 paths and all diagnostics except errors. Exit codes are 0 for success, 2 for
 invalid arguments, and 1 for collection, validation, or filesystem failures.
 Rate-limit errors include available retry/reset guidance and stop the run.
@@ -76,15 +86,19 @@ paths = backfill(
     "2024-01",
     "2024-12",
     output_directory="reports",
-    discovery="bounded",
+    # Default mode="history": one complete traversal.
 )
 ```
 
 `backfill("example", "project", output_directory="reports")` uses the same
 automatic endpoints. `backfill` also accepts `token=None` and returns a
-chronological list of saved paths on success. A failure raises immediately; already completed months remain
-usable. There is no automatic skipping, rollback, or resume. Reruns replace every
-requested month, including during backfill, without changing other months.
+chronological list of saved paths on success. History mode finishes collection
+and validates all selected reports before writing: collection or grouping failure
+leaves existing files untouched. Writing failures preserve already saved months.
+Monthly mode collects and writes one month at a time, preserving completed months
+if a later collection fails. There is no automatic skipping, rollback, or resume.
+Reruns replace every requested month, including during backfill, without changing
+other months.
 
 An output directory holds monthly reports for **one repository node ID**.
 Before writing, every direct child named `YYYY-MM.json` must be a valid report,
@@ -92,7 +106,9 @@ match its filename's month, and share that repository identity. Repository renam
 are allowed. Damaged files are rejected even when being replaced; move or repair
 them before retrying. Unrelated filenames and nested directories are ignored.
 Backfill and the CLI check existing files before making network requests; repository
-identity is compared when collection returns a report.
+identity is compared immediately after repository lookup in history mode, before
+traversing parents or commits. Monthly mode checks each returned report. A
+backfill scans the destination once; standalone writes still scan on every call.
 
 Writing validates the report, writes and validates a temporary UTF-8 file in the
 destination directory, and atomically replaces the target. Failure before
@@ -108,6 +124,44 @@ Test suites mirror source module names with a `test_` prefix: for example,
 in `tests/conftest.py` and `tests/helpers.py`; `tests/test_packaging.py` covers
 distribution integration. Pytest uses standard test filename discovery under
 `tests`, with importlib mode.
+
+## Collect once, group offline
+
+```python
+from repo_history import collect_history, history_to_months, write_report
+
+history = collect_history("example", "project")
+reports = history_to_months(history)  # Includes imported history and empty months.
+february = history_to_months(history, "2024-02", "2024-02")[0]
+for report in reports:
+    write_report(report, "reports")
+```
+
+`collect_history(owner, repo, *, token=None)` returns a frozen `RepositoryHistory`
+snapshot with repository identity, `repository_created_at`, captured default
+branch/head, collection timestamps, coverage limitations, actors, and activities.
+It uses one client and one repository lookup, fully traverses accessible issue/PR
+connections and their nested history, and walks commits reachable from the
+captured default head **without date filters**. It writes no files and raises
+without returning a partial snapshot if collection fails.
+
+`history_to_months(history, start=None, end=None)` makes no network requests and
+returns validated `MonthlyReport` objects in chronological order. It groups by the
+existing activity reporting timestamps in UTC and includes only actors referenced
+by each month's activities, including subject authors and committers. Every report
+shares the snapshot's collection interval and head, records both strategies as
+`full`, and omits bounded-collection warnings. Its default end and future-month
+validation use the snapshot's collection-start month, even if grouping happens
+later. Future-dated source activities remain in the snapshot but are excluded
+from supported output months until a later collection.
+
+History collection retains the same accessible-source and default-branch coverage
+limits as monthly collection. It holds the complete normalized history in memory;
+there is no disk cache or interruption resume. History mode benefits multi-month
+initial builds; independent monthly collection may be cheaper for a narrow range.
+Collection logs include elapsed time, request attempts, retries, measured REST and
+GraphQL points, and unmeasured attempts. Backfill also logs grouping/writing time.
+See [PERFORMANCE.md](PERFORMANCE.md) for deterministic measurements and limitations.
 
 ## Monthly activity collection
 

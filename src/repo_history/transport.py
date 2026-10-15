@@ -4,6 +4,8 @@ import logging
 import math
 import time
 from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -22,6 +24,17 @@ from .errors import (
 
 LOG = logging.getLogger(__name__)
 ENDPOINT = "https://api.github.com/graphql"
+_PARENT_CONTEXT = ContextVar("github_parent_log_context", default="")
+
+
+@contextmanager
+def _parent_log_context(kind: str, number: int):
+    """Carry a parent number through nested requests and restore it on exit."""
+    token = _PARENT_CONTEXT.set(f" {kind}={number}")
+    try:
+        yield
+    finally:
+        _PARENT_CONTEXT.reset(token)
 
 
 @dataclass
@@ -30,6 +43,8 @@ class _APIUsage:
 
     points: int = 0
     unmeasured_attempts: int = 0
+    attempts: int = 0
+    retries: int = 0
 
     def record(self, cost):
         if type(cost) is int and cost >= 0:
@@ -207,6 +222,8 @@ class GraphQLClient:
             diagnostic = dict(operation=operation_name, attempts=attempt)
             resource_failure = False
             self._api_usage["graphql"].unmeasured_attempts += 1
+            self._api_usage["graphql"].attempts += 1
+            self._api_usage["graphql"].retries += int(attempt > 1)
             try:
                 response = self._session.post(
                     ENDPOINT,
@@ -281,8 +298,9 @@ class GraphQLClient:
                         )
                     )
                     LOG.debug(
-                        "GitHub operation=%s attempt=%s status=%s request_id=%s remaining=%s reset=%s retry_after=%s",
+                        "GitHub operation=%s%s attempt=%s status=%s request_id=%s remaining=%s reset=%s retry_after=%s",
                         operation_name,
+                        _PARENT_CONTEXT.get(),
                         attempt,
                         status,
                         diagnostic["request_id"],
@@ -390,16 +408,18 @@ class GraphQLClient:
                     raise failure
                 values[page_size_variable] = max(1, size // 2)
                 LOG.info(
-                    "GitHub operation=%s attempt=%s page_size=%s",
+                    "GitHub operation=%s%s attempt=%s page_size=%s",
                     operation_name,
+                    _PARENT_CONTEXT.get(),
                     attempt,
                     values[page_size_variable],
                 )
             if attempt == self.max_attempts:
                 raise failure
             LOG.info(
-                "GitHub operation=%s retry_after=%s attempt=%s",
+                "GitHub operation=%s%s retry_after=%s attempt=%s",
                 operation_name,
+                _PARENT_CONTEXT.get(),
                 2 ** (attempt - 1),
                 attempt,
             )
@@ -443,6 +463,8 @@ class GraphQLClient:
             self._check_budget("rest", operation_name)
             diagnostic = dict(operation=operation_name, attempts=attempt)
             self._api_usage["rest"].unmeasured_attempts += 1
+            self._api_usage["rest"].attempts += 1
+            self._api_usage["rest"].retries += int(attempt > 1)
             try:
                 response = self._session.get(
                     url,
@@ -484,8 +506,9 @@ class GraphQLClient:
                         )
                     )
                     LOG.debug(
-                        "GitHub REST operation=%s attempt=%s status=%s request_id=%s remaining=%s reset=%s retry_after=%s",
+                        "GitHub REST operation=%s%s attempt=%s status=%s request_id=%s remaining=%s reset=%s retry_after=%s",
                         operation_name,
+                        _PARENT_CONTEXT.get(),
                         attempt,
                         status,
                         diagnostic["request_id"],
@@ -532,8 +555,9 @@ class GraphQLClient:
             if attempt == self.max_attempts:
                 raise failure
             LOG.info(
-                "GitHub REST operation=%s retry_after=%s attempt=%s",
+                "GitHub REST operation=%s%s retry_after=%s attempt=%s",
                 operation_name,
+                _PARENT_CONTEXT.get(),
                 2 ** (attempt - 1),
                 attempt,
             )

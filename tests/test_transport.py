@@ -293,3 +293,32 @@ def test_timeout_and_attempt_overrides(client):
         execute(client)
     assert exc.value.attempts == 1
     assert client._session.calls[0][1]["timeout"] == (2, 3)
+
+
+def test_parent_logging_context_survives_retries_and_restores_after_errors(
+    client, caplog
+):
+    from repo_history.transport import _parent_log_context
+
+    caplog.set_level("DEBUG", logger="repo_history.transport")
+    client._session.responses = [
+        Response(status=503),
+        Response(),
+        Response(status=403),
+        Response(),
+        Response(),
+    ]
+    with _parent_log_context("issue", 42):
+        execute(client)
+        with pytest.raises(api.AuthenticationError):
+            with _parent_log_context("pr", 87):
+                execute(client)
+        execute(client)
+    execute(client)
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("issue=42 retry_after=1 attempt=1" in message for message in messages)
+    requests = [message for message in messages if " status=" in message]
+    assert " issue=42 " in requests[0] and " issue=42 " in requests[1]
+    assert " pr=87 " in requests[2]
+    assert " issue=42 " in requests[3] and " pr=" not in requests[3]
+    assert " issue=" not in requests[4] and " pr=" not in requests[4]

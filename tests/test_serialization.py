@@ -26,8 +26,32 @@ def test_fixtures_round_trip(name):
         json.loads(text)
     )
     report = report_from_json(text)
+    assert report.metadata.parent_discovery is None
     assert report_from_json(report_to_json(report)) == report
     assert report_to_json(report) == text
+
+
+@pytest.mark.parametrize("strategy", ["bounded", "full"])
+def test_parent_discovery_round_trip(mixed, strategy):
+    report = replace(mixed, metadata=replace(mixed.metadata, parent_discovery=strategy))
+    text = report_to_json(report)
+    assert json.loads(text)["metadata"]["parent_discovery"] == strategy
+    assert report_from_json(text) == report
+
+
+@pytest.mark.parametrize("strategy", ["unknown", True, 0, None])
+def test_invalid_parent_discovery_json_rejected(mixed, strategy):
+    data = json.loads(report_to_json(mixed))
+    data["metadata"]["parent_discovery"] = strategy
+    with pytest.raises(ReportValidationError, match="parent_discovery"):
+        report_from_json(json.dumps(data))
+
+
+@pytest.mark.parametrize("strategy", ["unknown", True, 0])
+def test_invalid_parent_discovery_model_rejected(mixed, strategy):
+    report = replace(mixed, metadata=replace(mixed.metadata, parent_discovery=strategy))
+    with pytest.raises(ReportValidationError, match="parent_discovery"):
+        report_to_json(report)
 
 
 def test_timezone_normalization_and_precision_order(mixed):

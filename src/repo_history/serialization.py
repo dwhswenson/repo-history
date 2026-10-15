@@ -31,7 +31,7 @@ def to_data(value: Any, path: str = "$") -> Any:
             for f in fields(value)
             if not (
                 isinstance(value, ReportMetadata)
-                and f.name == "commit_history"
+                and f.name in ("commit_history", "parent_discovery")
                 and getattr(value, f.name) is None
             )
         }

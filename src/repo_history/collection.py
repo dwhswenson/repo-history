@@ -35,7 +35,7 @@ from .queries import (
 )
 from .reports import build_report
 from .repository import lookup_repository
-from .transport import GraphQLClient
+from .transport import GraphQLClient, _parent_log_context
 
 LOG = logging.getLogger(__name__)
 
@@ -57,6 +57,11 @@ COVERAGE_LIMITATIONS = (
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _in_interval(occurred, start, end):
+    """None bounds retain all timestamps for history-first collection."""
+    return (start is None or start <= occurred) and (end is None or occurred < end)
 
 
 def _month_bounds(year: int, month: int) -> tuple[datetime, datetime]:
@@ -229,7 +234,7 @@ def _collect_parent(client, value, operation, start, end, records, *, issues):
     author = _actor(_field(parent, "author", operation), operation)
     subject = _subject(parent, "issue" if issues else "pull_request", author, operation)
     created = _timestamp(parent, operation)
-    if start <= created < end:
+    if _in_interval(created, start, end):
         kind = "issue_opened" if issues else "pr_opened"
         details = (
             IssueOpenedMetadata(subject.node_id)
@@ -249,11 +254,12 @@ def _collect_parent(client, value, operation, start, end, records, *, issues):
             (author,),
             operation,
         )
-    _collect_timeline(client, subject, author, start, end, records, issues=issues)
-    _collect_comments(client, subject, author, start, end, records, issues=issues)
-    if not issues:
-        _collect_reviews(client, subject, author, start, end, records)
-        _collect_threads(client, subject, author, start, end, records)
+    with _parent_log_context("issue" if issues else "pr", subject.number):
+        _collect_timeline(client, subject, author, start, end, records, issues=issues)
+        _collect_comments(client, subject, author, start, end, records, issues=issues)
+        if not issues:
+            _collect_reviews(client, subject, author, start, end, records)
+            _collect_threads(client, subject, author, start, end, records)
 
 
 def _collect_timeline(client, subject, author, start, end, records, *, issues):
@@ -296,7 +302,7 @@ def _collect_timeline(client, subject, author, start, end, records, *, issues):
                     )
             details = PRMergedMetadata(source_id, sha)
             url = _string(event, "url", operation)
-        if start <= occurred < end:
+        if _in_interval(occurred, start, end):
             records.add(
                 Activity(
                     f"{kind}:{source_id}",
@@ -336,7 +342,7 @@ def _add_authored(
     source_id = _string(item, "id", operation)
     author = _actor(_field(item, "author", operation), operation)
     url = _string(item, "url", operation)
-    if start <= occurred < end:
+    if _in_interval(occurred, start, end):
         records.add(
             Activity(
                 f"{kind}:{source_id}",

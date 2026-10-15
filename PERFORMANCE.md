@@ -1,8 +1,55 @@
-# Collector performance plan
+# Collector performance
 
-Bounded discovery is now the default by user preference. The validation work
-below remains outstanding; this default change does not establish completeness.
+For single-month collection and monthly-mode backfill, bounded discovery is the
+default by user preference. The validation work below remains outstanding; this
+default change does not establish completeness.
 Full traversal remains available through `discovery="full"`.
+
+## History-first backfill
+
+Backfill now defaults to collecting a `RepositoryHistory` snapshot once, followed
+by `history_to_months` offline projection. Parent connections and each nested
+connection are exhausted once rather than revisited per month. Commit history is
+walked once from a captured default-branch SHA without `since`/`until`. A single
+client also shares canonical commit actor resolution across the complete run.
+Destination reports are scanned once per backfill, avoiding repeated directory
+validation as months are written.
+
+The deterministic `tests/test_history.py` fixture covers all activity types and
+parent/nested pagination, with one synthetic GraphQL point per response. For the
+same three-month output (January–March 2024):
+
+| Path | Requests | Synthetic GraphQL points |
+|---|---:|---:|
+| History-first backfill | 23 | 23 |
+| Monthly backfill, full parent discovery | 58 | 58 |
+
+This is a 60% reduction in fixture requests/points. These synthetic costs do not
+predict GitHub's actual query costs. A sample local run took 0.079 s versus
+0.083 s; mocked latency is negligible and these timings establish no live speedup.
+Reproduce the comparison with:
+
+```text
+pixi run -e dev python -m pytest tests/test_history.py::test_monthly_equivalence_and_request_measurement -s
+```
+
+The comparison asserts identical activities, actors, and summaries, while
+provenance differs intentionally. A separate fixture verifies recovery of a
+commit hidden by bounded history pruning. Collection logs report actual request
+attempts/retries, measured API points and unmeasured attempts, including failed
+runs; backfill reports grouping/writing time.
+
+Live cost/runtime comparisons remain optional and have not been run. For live
+evaluation, use equivalent credentials and output ranges, run both modes close
+together, compare normalized activities and captured heads, and report actual
+GraphQL costs, throttling, and elapsed-time variability. A full history walk may
+be more expensive than monthly collection for a narrow range. The complete
+snapshot stays in memory; interruption requires a fresh traversal.
+
+## Monthly collector optimization plan
+
+The remaining plan below concerns `collect_month` and `backfill(mode="monthly")`.
+It is independent of history-first backfill and its full parent discovery.
 
 ## Objective and current behavior
 
@@ -11,12 +58,13 @@ attribution, or report semantics. This document proposes implementation and
 validation work; it does not establish that parent update timestamps are already
 safe to use as a completeness filter.
 
-Currently, `collection.py::_collect_parents` paginates every accessible issue and
-PR through the unfiltered repository connections in `queries.py`. For each
-parent it independently traverses lifecycle events, conversation comments, and,
-for PRs, reviews, review threads, and thread comments. Activities are retained
-only when their reporting timestamp is in the requested month. Each monthly run
-repeats this work; there is no persistent cache.
+In full monthly mode, `discovery.py::discover_parents` paginates every accessible
+issue and PR through unfiltered repository connections. For each parent,
+`collection.py` independently traverses lifecycle events, conversation comments,
+and, for PRs, reviews, review threads, and thread comments. Activities are retained
+only when their reporting timestamp is in the requested month. Each independent
+monthly run repeats nested traversal; there is no persistent cache. Default
+bounded discovery selects candidate parents before this nested traversal.
 
 Keep this full traversal as the reference implementation while evaluating the
 optimization. Parent creation month and current state alone cannot select the
@@ -207,8 +255,8 @@ Accept the optimization only when:
 After isolating parent-discovery gains, consider verified `timelineItems.since`
 filters to reduce lifecycle event retrieval. Keep exact local month boundaries;
 do not apply timeline creation-time filtering blindly to comments counted by
-publication time. Caching, collecting history once for multiple months, and
-commit-history optimization remain separate workstreams.
+publication time. Persistent caching and further commit-history optimization remain separate
+workstreams. Collecting history once for multiple months is implemented above.
 
 ## Sources and evidence
 

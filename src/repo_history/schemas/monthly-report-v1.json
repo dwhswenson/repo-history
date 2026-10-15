@@ -254,6 +254,9 @@
         },
         "commit_history": {
           "enum": ["bounded", "full"]
+        },
+        "parent_discovery": {
+          "enum": ["bounded", "full"]
         }
       },
       "required": [

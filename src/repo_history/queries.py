@@ -100,6 +100,7 @@ query CommitParents($id: ID!, $first: Int!, $after: String) {
 REPOSITORY_FRAGMENT = """
 fragment RepositoryIdentity on Repository {
   id
+  createdAt
   databaseId
   nameWithOwner
   url

@@ -112,7 +112,16 @@ def test_verbosity(tmp_path, collector, capsys, flag):
         ["o/r", "--month", "2024-04"],
         ["o/r", "--discovery", "bad"],
         ["o/r", "--quiet", "--verbose"],
-        ["backfill", "o/r", "--start", "2024-03", "--end", "2024-02"],
+        [
+            "backfill",
+            "--mode",
+            "monthly",
+            "o/r",
+            "--start",
+            "2024-03",
+            "--end",
+            "2024-02",
+        ],
     ],
 )
 def test_invalid_arguments_exit_two_before_network(tmp_path, collector, arguments):
@@ -183,6 +192,8 @@ def test_backfill_prints_completed_month_before_failure(
     result = cli.main(
         [
             "backfill",
+            "--mode",
+            "monthly",
             "o/r",
             "--start",
             "2024-01",
@@ -273,7 +284,17 @@ def test_backfill_optional_endpoints(
         backfill_module, "_lookup_start", lambda *args: ("R_example", "2024-01")
     )
     assert (
-        cli.main(["backfill", "o/r", *arguments, "--output-directory", str(tmp_path)])
+        cli.main(
+            [
+                "backfill",
+                "--mode",
+                "monthly",
+                "o/r",
+                *arguments,
+                "--output-directory",
+                str(tmp_path),
+            ]
+        )
         == 0
     )
     assert [c[2:4] for c in collector] == expected

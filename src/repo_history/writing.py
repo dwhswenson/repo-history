@@ -39,9 +39,15 @@ def write_report(report: MonthlyReport, output_directory: str | os.PathLike) -> 
     ReportValidationError; inconsistent existing files raise ReportWriteError.
     Filesystem errors propagate. Concurrent writers require external coordination.
     """
+    return _write_report(report, output_directory, check_directory=True)
+
+
+def _write_report(report, output_directory, *, check_directory=False):
+    """Atomic writer for a destination already checked by a sequential backfill."""
     text = report_to_json(report)
     directory = Path(output_directory)
-    _check_directory(directory, report.metadata.repository_node_id)
+    if check_directory:
+        _check_directory(directory, report.metadata.repository_node_id)
     directory.mkdir(parents=True, exist_ok=True)
     target = directory / f"{report.metadata.month}.json"
     temporary = None

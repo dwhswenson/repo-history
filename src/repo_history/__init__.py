@@ -15,6 +15,7 @@ from .errors import (
     RepositoryUnavailableError,
     TransportError,
 )
+from .history import collect_history, history_to_months
 from .identities import git_identity_key, unresolved_git_actor
 from .models import (
     ACTIVITY_TYPES,
@@ -36,6 +37,7 @@ from .models import (
     PROpenedMetadata,
     PRReviewMetadata,
     ReportMetadata,
+    RepositoryHistory,
     Subject,
 )
 from .reports import build_report
@@ -47,6 +49,9 @@ from .validation import load_schema, validate_report
 from .writing import write_report
 
 __all__ = [
+    "collect_history",
+    "history_to_months",
+    "RepositoryHistory",
     "backfill",
     "write_report",
     "ReportWriteError",

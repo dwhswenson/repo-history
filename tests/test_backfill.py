@@ -55,6 +55,7 @@ def test_chronological_inclusive_range_and_replacement(tmp_path, collector):
         "repo",
         "2023-12",
         "2024-03",
+        mode="monthly",
         output_directory=tmp_path,
         token="secret",
         discovery="bounded",
@@ -75,7 +76,9 @@ def test_chronological_inclusive_range_and_replacement(tmp_path, collector):
     leap = report_from_json(paths[2].read_text()).metadata
     assert leap.month_end - leap.month_start == timedelta(days=29)
     before = {p: p.read_bytes() for p in paths}
-    backfill("owner", "repo", "2024-02", "2024-02", output_directory=tmp_path)
+    backfill(
+        "owner", "repo", "2024-02", "2024-02", mode="monthly", output_directory=tmp_path
+    )
     assert len(calls) == 5
     assert calls[-1][2:4] == (2024, 2)
     assert all(p.read_bytes() == text for p, text in before.items())
@@ -96,7 +99,7 @@ def test_chronological_inclusive_range_and_replacement(tmp_path, collector):
 def test_invalid_range_before_network(tmp_path, collector, start, end):
     calls, _ = collector
     with pytest.raises(ValueError):
-        backfill("owner", "repo", start, end, output_directory=tmp_path)
+        backfill("owner", "repo", start, end, mode="monthly", output_directory=tmp_path)
     assert not calls
     assert not list(tmp_path.iterdir())
 
@@ -113,6 +116,7 @@ def test_invalid_request(tmp_path, collector, owner, repo, discovery):
             repo,
             "2024-01",
             "2024-02",
+            mode="monthly",
             output_directory=tmp_path,
             discovery=discovery,
         )
@@ -123,7 +127,9 @@ def test_bad_destination_before_network(tmp_path, collector):
     calls, _ = collector
     (tmp_path / "2024-01.json").write_text("broken")
     with pytest.raises(ReportWriteError):
-        backfill("o", "r", "2024-02", "2024-03", output_directory=tmp_path)
+        backfill(
+            "o", "r", "2024-02", "2024-03", mode="monthly", output_directory=tmp_path
+        )
     assert not calls
 
 
@@ -148,7 +154,7 @@ def test_failure_keeps_completed_months_and_stops(
         return report
 
     monkeypatch.setattr(module, "collect_month", failing_collect)
-    writer = module.write_report
+    writer = module._write_report
 
     def failing_write(report, directory):
         if report.metadata.month == "2024-02":
@@ -156,7 +162,7 @@ def test_failure_keeps_completed_months_and_stops(
         return writer(report, directory)
 
     if failure == "writing":
-        monkeypatch.setattr(module, "write_report", failing_write)
+        monkeypatch.setattr(module, "_write_report", failing_write)
     completed = []
     with pytest.raises((RuntimeError, OSError, ReportWriteError)):
         module._run_backfill(
@@ -164,6 +170,7 @@ def test_failure_keeps_completed_months_and_stops(
             "r",
             "2024-01",
             "2024-03",
+            mode="monthly",
             output_directory=tmp_path,
             on_written=completed.append,
         )
@@ -175,7 +182,9 @@ def test_failure_keeps_completed_months_and_stops(
 
 
 def test_current_month_accepted(tmp_path, collector):
-    paths = backfill("o", "r", "2025-01", "2025-01", output_directory=tmp_path)
+    paths = backfill(
+        "o", "r", "2025-01", "2025-01", mode="monthly", output_directory=tmp_path
+    )
     assert len(paths) == 1
 
 
@@ -190,7 +199,9 @@ def test_mixed_repository_directory_fails_before_network(tmp_path, collector):
     (tmp_path / "2024-02.json").write_text(report_to_json(second))
     calls.clear()
     with pytest.raises(ReportWriteError, match="2024-02.json"):
-        backfill("o", "r", "2024-03", "2024-03", output_directory=tmp_path)
+        backfill(
+            "o", "r", "2024-03", "2024-03", mode="monthly", output_directory=tmp_path
+        )
     assert not calls
 
 
@@ -211,7 +222,9 @@ def test_automatic_endpoints(tmp_path, collector, monkeypatch, start, end, expec
         return "R_example", "2024-11"
 
     monkeypatch.setattr(module, "_lookup_start", lookup)
-    paths = backfill("o", "r", start, end, output_directory=tmp_path, token="test")
+    paths = backfill(
+        "o", "r", start, end, mode="monthly", output_directory=tmp_path, token="test"
+    )
     assert [(c[2], c[3]) for c in calls] == expected
     assert all(c[4]["discovery"] == "bounded" for c in calls)
     assert len(paths) == len(expected)
@@ -221,7 +234,7 @@ def test_automatic_endpoints(tmp_path, collector, monkeypatch, start, end, expec
 def test_automatic_start_keeps_lookup_identity(tmp_path, collector, monkeypatch):
     monkeypatch.setattr(module, "_lookup_start", lambda *args: ("R_other", "2024-11"))
     with pytest.raises(ReportWriteError):
-        backfill("o", "r", output_directory=tmp_path)
+        backfill("o", "r", mode="monthly", output_directory=tmp_path)
     assert not list(tmp_path.iterdir())
 
 
@@ -232,7 +245,7 @@ def test_invalid_optional_end_before_lookup(tmp_path, collector, monkeypatch):
     monkeypatch.setattr(module, "_lookup_start", unexpected)
     for end in ("2025-02", "bad"):
         with pytest.raises(ValueError):
-            backfill("o", "r", end=end, output_directory=tmp_path)
+            backfill("o", "r", end=end, mode="monthly", output_directory=tmp_path)
 
 
 def test_bad_directory_before_automatic_lookup(tmp_path, collector, monkeypatch):
@@ -243,7 +256,7 @@ def test_bad_directory_before_automatic_lookup(tmp_path, collector, monkeypatch)
 
     monkeypatch.setattr(module, "_lookup_start", unexpected)
     with pytest.raises(ReportWriteError):
-        backfill("o", "r", output_directory=tmp_path)
+        backfill("o", "r", mode="monthly", output_directory=tmp_path)
 
 
 def test_creation_lookup_utc_month_and_client_cleanup(client):

@@ -2,6 +2,7 @@
 
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from .errors import GraphQLError, RepositoryUnavailableError
 from .queries import REPOSITORY_QUERY
@@ -17,6 +18,7 @@ class RepositorySnapshot:
     default_branch: str | None
     default_branch_head: str | None
     database_id: int | None = None
+    created_at: datetime | None = None
 
 
 def lookup_repository(
@@ -50,6 +52,17 @@ def lookup_repository(
     database_id = item.get("databaseId")
     if database_id is not None and (type(database_id) is not int or database_id <= 0):
         raise GraphQLError("malformed repository database ID", operation=operation)
+    created = None
+    if "createdAt" in item:
+        try:
+            created = datetime.fromisoformat(item["createdAt"])
+            if created.tzinfo is None:
+                raise ValueError("timezone required")
+            created = created.astimezone(timezone.utc)
+        except (TypeError, ValueError, OverflowError):
+            raise GraphQLError(
+                "malformed repository creation timestamp", operation=operation
+            ) from None
     name = head = None
     if branch is None:
         if not item["isEmpty"]:
@@ -77,4 +90,5 @@ def lookup_repository(
         name,
         head,
         database_id,
+        created,
     )

@@ -3,7 +3,7 @@
 import re
 from datetime import datetime, timedelta, timezone
 
-from .collection import _actor, _field, _object, _string, _timestamp
+from .collection import _actor, _field, _in_interval, _object, _string, _timestamp
 from .errors import GraphQLError, PaginationError
 from .identities import unresolved_git_actor
 from .models import Activity, CommitMetadata, Credit, GitIdentity, Subject
@@ -112,7 +112,9 @@ def _nested(client, item, field, query, operation):
 
 
 def collect_commits(client, repository, start, end, records):
-    strategy, bounds = history_bounds(start, end)
+    strategy, bounds = (
+        ("full", {}) if start is None and end is None else history_bounds(start, end)
+    )
     if repository.default_branch_head is None:
         return strategy
     resolved = {}
@@ -130,7 +132,7 @@ def collect_commits(client, repository, start, end, records):
         item = _object(value, OPERATION)
         sha = _sha(item, OPERATION)
         occurred = _timestamp(item, OPERATION, "committedDate")
-        if not start <= occurred < end:
+        if not _in_interval(occurred, start, end):
             continue
         node_id = _string(item, "id", OPERATION)
         url = _string(item, "url", OPERATION)

@@ -55,6 +55,7 @@ class ReportMetadata:
     default_branch_head: str | None
     coverage_limitations: tuple[str, ...] = ()
     commit_history: Literal["bounded", "full"] | None = None
+    parent_discovery: Literal["bounded", "full"] | None = None
 
 
 @dataclass(frozen=True)
@@ -206,3 +207,20 @@ class MonthlyReport:
     activities: tuple[Activity, ...]
     summaries: MonthlySummaries
     schema_version: str = "1"
+
+
+@dataclass(frozen=True)
+class RepositoryHistory:
+    """In-memory normalized history from one collection, before month selection."""
+
+    repository_node_id: str
+    repository_full_name: str
+    repository_url: str
+    repository_created_at: datetime
+    default_branch: str | None
+    default_branch_head: str | None
+    collection_started_at: datetime
+    collection_finished_at: datetime
+    coverage_limitations: tuple[str, ...]
+    actors: tuple[Actor, ...]
+    activities: tuple[Activity, ...]
