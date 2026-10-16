@@ -1,12 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
-import { source } from "../fixtures";
-
-const payload = (month: string, isEmpty = false) => ({
-  name: `${month}.json`,
-  mimeType: "application/json",
-  buffer: Buffer.from(source(month, isEmpty).text),
-});
+import { manifestSource as source, combinedSource, fixture } from "../fixtures";
 
 async function csvLines(page: Page): Promise<string[]> {
   const ready = page.waitForEvent("download");
@@ -29,9 +23,13 @@ test("local files, controls, gaps, range sliders, and failed replacement", async
       name: "A clearer view of repository activity",
     }),
   ).toBeVisible();
-  await page
-    .getByLabel("Choose monthly JSON reports")
-    .setInputFiles([payload("2024-02"), payload("2024-04", true)]);
+  await page.getByLabel("Choose manifest JSON").setInputFiles({
+    name: "manifest.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(
+      combinedSource([fixture(), fixture("2024-04", true)]).text,
+    ),
+  });
   await expect(page.locator("#repository-name")).toHaveText("example/project");
   await expect(page.locator("#warnings")).toContainText(
     "Missing reports: 2024-03",
@@ -85,7 +83,7 @@ test("local files, controls, gaps, range sliders, and failed replacement", async
   );
   await page.getByRole("button", { name: "All available months" }).click();
   expect(await csvLines(page)).toHaveLength(4);
-  await page.getByLabel("Choose monthly JSON reports").setInputFiles({
+  await page.getByLabel("Choose manifest JSON").setInputFiles({
     name: "broken.json",
     mimeType: "application/json",
     buffer: Buffer.from("{"),
@@ -105,18 +103,12 @@ test("local files, controls, gaps, range sliders, and failed replacement", async
 test("hosted reports, partial months, combined contributors, and mobile layout", async ({
   page,
 }) => {
-  const partial = JSON.parse(source("2024-03").text);
+  const partial = fixture("2024-03");
   partial.metadata.ongoing = true;
   partial.metadata.collection_started_at = "2024-03-15T12:00:00Z";
   partial.metadata.collection_finished_at = "2024-03-15T12:05:00Z";
   await page.route("**/reports/manifest.json", (route) =>
-    route.fulfill({ json: { files: ["2024-03.json", "2024-02.json"] } }),
-  );
-  await page.route("**/reports/2024-02.json", (route) =>
-    route.fulfill({ contentType: "application/json", body: source().text }),
-  );
-  await page.route("**/reports/2024-03.json", (route) =>
-    route.fulfill({ json: partial }),
+    route.fulfill({ body: combinedSource([partial, fixture()]).text }),
   );
   await page.goto("/");
   await page.getByLabel("Hosted manifest URL").fill("/reports/manifest.json");
@@ -163,9 +155,11 @@ test("measure selection separates commits, GitHub events, contributors, and cumu
   page,
 }) => {
   await page.goto("/");
-  await page
-    .getByLabel("Choose monthly JSON reports")
-    .setInputFiles([payload("2024-02"), payload("2024-03")]);
+  await page.getByLabel("Choose manifest JSON").setInputFiles({
+    name: "manifest.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(combinedSource([fixture(), fixture("2024-03")]).text),
+  });
   const measure = page.getByLabel("Measure", { exact: true });
   await expect(measure).toHaveValue("github-activities");
   await expect(page.getByLabel("Commits", { exact: true })).toBeHidden();
@@ -209,9 +203,11 @@ test("downloads the current chart as a PNG with its repository and range in the 
   page,
 }) => {
   await page.goto("/");
-  await page
-    .getByLabel("Choose monthly JSON reports")
-    .setInputFiles([payload("2024-02"), payload("2024-03")]);
+  await page.getByLabel("Choose manifest JSON").setInputFiles({
+    name: "manifest.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(combinedSource([fixture(), fixture("2024-03")]).text),
+  });
   await page.getByLabel("Measure", { exact: true }).selectOption("commits");
   const downloadReady = page.waitForEvent("download");
   await page.getByRole("button", { name: "Download PNG" }).click();
@@ -231,9 +227,11 @@ test("GitHub activity actor filters update chart downloads with bots excluded by
   page,
 }) => {
   await page.goto("/");
-  await page
-    .getByLabel("Choose monthly JSON reports")
-    .setInputFiles([payload("2024-02"), payload("2024-03")]);
+  await page.getByLabel("Choose manifest JSON").setInputFiles({
+    name: "manifest.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(combinedSource([fixture(), fixture("2024-03")]).text),
+  });
   await expect(
     page.getByLabel("Known bots", { exact: true }),
   ).not.toBeChecked();

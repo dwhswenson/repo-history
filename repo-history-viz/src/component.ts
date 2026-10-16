@@ -1,5 +1,5 @@
 import { createViewer } from "./viewer.js";
-import type { ReportSource } from "./report.js";
+import type { ManifestSource } from "./report.js";
 
 // Importing the package during static rendering must not require a browser DOM.
 const ElementBase = globalThis.HTMLElement ?? (class {} as typeof HTMLElement);
@@ -45,18 +45,18 @@ export class RepoHistoryViz extends ElementBase {
   loadManifest(url: string): Promise<void> {
     if (!this.isConnected || !this.viewer)
       return Promise.reject(
-        new Error("Connect the viewer before loading reports."),
+        new Error("Connect the viewer before loading a manifest."),
       );
     return this.viewer.loadUrl(url);
   }
 
-  /** Load report JSON strings without a network request. */
-  loadReports(sources: ReportSource[]): Promise<void> {
+  /** Load manifest JSON without a network request. */
+  loadManifestSource(source: ManifestSource): Promise<void> {
     if (!this.isConnected || !this.viewer)
       return Promise.reject(
-        new Error("Connect the viewer before loading reports."),
+        new Error("Connect the viewer before loading a manifest."),
       );
-    return this.viewer.loadSources(sources);
+    return this.viewer.loadSource(source);
   }
 }
 

@@ -1,6 +1,6 @@
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
-import schema from "../../src/repo_history/schemas/monthly-report-v1.json" with { type: "json" };
+import schema from "../../src/repo_history/schemas/viz-manifest-v1.json" with { type: "json" };
 
 export const ACTIVITY_LABELS = {
   commit: "Commits",
@@ -18,13 +18,15 @@ export type ActivityType = keyof typeof ACTIVITY_LABELS;
 export const ACTIVITY_TYPES = Object.keys(ACTIVITY_LABELS) as ActivityType[];
 export type Classification = "human" | "bot" | "unresolved_git";
 
-// The viewer consumes this subset; the shared JSON schema validates the full report.
-export interface MonthlyReport {
-  schema_version: "1";
+export type Counts = Record<ActivityType, number>;
+export interface Population {
+  total: number;
+  human: number;
+  bot: number;
+  unresolved_git: number;
+}
+export interface MonthSummary {
   metadata: {
-    repository_node_id: string;
-    repository_full_name: string;
-    repository_url: string;
     month: string;
     month_start: string;
     month_end: string;
@@ -33,24 +35,32 @@ export interface MonthlyReport {
     ongoing: boolean;
     coverage_limitations: string[];
   };
-  actors: { key: string; classification: Classification }[];
-  activities: {
-    id: string;
-    type: ActivityType;
-    occurred_at: string;
-    credits: { actor_key: string | null; role: string }[];
-    subject: { author_key: string | null } | null;
-  }[];
+  summaries: {
+    repository_counts: Counts;
+    actor_counts: Record<string, Counts>;
+    distinct_actors: Population;
+    distinct_actors_by_type: Record<ActivityType, Population>;
+    unattributed_total: number;
+    unattributed_by_type: Counts;
+  };
 }
-export interface ReportSource {
+export interface Manifest {
+  schema_version: "1";
+  repository: { node_id: string; full_name: string; url: string };
+  actors: Record<string, Classification>;
+  months: MonthSummary[];
+}
+export interface ManifestSource {
   name: string;
   text: string;
 }
-
-const ajv = new Ajv2020({ allErrors: true, strict: false });
+const ajv = new Ajv2020({
+  allErrors: true,
+  strict: false,
+  ownProperties: true,
+});
 addFormats(ajv);
-const validate = ajv.compile<MonthlyReport>(schema);
-
+const validate = ajv.compile<Manifest>(schema);
 export function nextMonth(month: string): string {
   const [year, number] = month.split("-").map(Number);
   return number === 12
@@ -58,85 +68,107 @@ export function nextMonth(month: string): string {
     : `${String(year).padStart(4, "0")}-${String(number! + 1).padStart(2, "0")}`;
 }
 
-export function parseReport(source: ReportSource): MonthlyReport {
+export function parseManifest(source: ManifestSource): Manifest {
+  const fail = (message: string): never => {
+    throw new Error(`${source.name}: ${message}`);
+  };
   let value: unknown;
   try {
     value = JSON.parse(source.text);
   } catch {
-    throw new Error(`${source.name}: invalid JSON.`);
+    return fail("invalid JSON.");
+  }
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    ("files" in value || "activities" in value)
+  ) {
+    return fail(
+      "Load a summary manifest generated with repo-history manifest --input-directory REPORTS.",
+    );
   }
   if (!validate(value)) {
-    const errors = validate.errors
-      ?.slice(0, 3)
-      .map((error) => `${error.instancePath || "/"} ${error.message}`)
-      .join("; ");
-    throw new Error(`${source.name}: invalid v1 report — ${errors}`);
+    return fail(
+      `invalid v1 visualization manifest — ${validate.errors
+        ?.slice(0, 3)
+        .map((e) => `${e.instancePath || "/"} ${e.message}`)
+        .join("; ")}`,
+    );
   }
-  const fail = (message: string): never => {
-    throw new Error(`${source.name}: ${message}`);
-  };
-  const month = value.metadata.month;
-  if (month.startsWith("0000-")) fail("month must have a positive year.");
-  if (
-    Date.parse(value.metadata.month_start) !==
-      Date.parse(`${month}-01T00:00:00Z`) ||
-    Date.parse(value.metadata.month_end) !==
-      Date.parse(`${nextMonth(month)}-01T00:00:00Z`)
-  ) {
-    fail("month boundaries must match the reporting month in UTC.");
-  }
-  const actors = new Set<string>();
-  for (const actor of value.actors) {
-    if (actors.has(actor.key)) fail(`duplicate actor key ${actor.key}.`);
-    actors.add(actor.key);
-  }
-  const ids = new Set<string>();
-  for (const activity of value.activities) {
-    if (ids.has(activity.id)) fail(`duplicate activity ID ${activity.id}.`);
-    ids.add(activity.id);
+  const seen = new Set<string>();
+  const used = new Set<string>();
+  const population = (keys: string[]): Population => ({
+    total: keys.length,
+    human: keys.filter((k) => value.actors[k] === "human").length,
+    bot: keys.filter((k) => value.actors[k] === "bot").length,
+    unresolved_git: keys.filter((k) => value.actors[k] === "unresolved_git")
+      .length,
+  });
+  const samePopulation = (actual: Population, expected: Population) =>
+    (Object.keys(expected) as (keyof Population)[]).every(
+      (k) => actual[k] === expected[k],
+    );
+  for (const { metadata: m, summaries: s } of value.months) {
+    if (seen.has(m.month)) fail(`duplicate month ${m.month}.`);
+    seen.add(m.month);
     if (
-      Date.parse(activity.occurred_at) <
-        Date.parse(value.metadata.month_start) ||
-      Date.parse(activity.occurred_at) >= Date.parse(value.metadata.month_end)
-    ) {
-      fail(`activity ${activity.id} falls outside its reporting month.`);
+      m.month.startsWith("0000-") ||
+      m.month === "9999-12" ||
+      Date.parse(m.month_start) !== Date.parse(`${m.month}-01T00:00:00Z`) ||
+      Date.parse(m.month_end) !==
+        Date.parse(`${nextMonth(m.month)}-01T00:00:00Z`)
+    )
+      fail("month boundaries must match reporting month in UTC.");
+    const start = Date.parse(m.month_start),
+      end = Date.parse(m.month_end);
+    const collected = Date.parse(m.collection_started_at),
+      finished = Date.parse(m.collection_finished_at);
+    if (!(start <= collected && collected <= finished))
+      fail("invalid collection interval.");
+    if (m.ongoing !== (start <= collected && collected < end))
+      fail("ongoing must reflect collection start.");
+    const entries = Object.entries(s.actor_counts);
+    for (const [key, counts] of entries) {
+      if (!Object.hasOwn(value.actors, key)) fail(`unknown actor ${key}.`);
+      if (!Object.values(counts).some((n) => n > 0))
+        fail(`actor ${key} has no participation.`);
+      used.add(key);
     }
-    for (const credit of activity.credits) {
-      if (credit.actor_key !== null && !actors.has(credit.actor_key)) {
-        fail(
-          `activity ${activity.id} references unknown actor ${credit.actor_key}.`,
-        );
-      }
+    if (!samePopulation(s.distinct_actors, population(entries.map(([k]) => k))))
+      fail("distinct actor population disagrees with actor counts.");
+    if (
+      s.unattributed_total !==
+      Object.values(s.unattributed_by_type).reduce((a, b) => a + b, 0)
+    )
+      fail("unattributed total disagrees with type counts.");
+    for (const type of ACTIVITY_TYPES) {
+      const keys = entries
+        .filter(([, counts]) => counts[type] > 0)
+        .map(([k]) => k);
+      if (!samePopulation(s.distinct_actors_by_type[type], population(keys)))
+        fail(`${type} population disagrees with actor counts.`);
+      const total = s.repository_counts[type],
+        unattributed = s.unattributed_by_type[type];
+      if (unattributed > total)
+        fail(`${type} unattributed exceeds repository count.`);
+      if (entries.some(([, counts]) => counts[type] > total))
+        fail(`${type} actor count exceeds repository count.`);
+      const attributed = entries.reduce(
+        (sum, [, counts]) => sum + counts[type],
+        0,
+      );
+      if (
+        type === "commit"
+          ? attributed < total - unattributed
+          : attributed + unattributed !== total
+      )
+        fail(`${type} repository count disagrees with attribution.`);
     }
   }
+  if (used.size !== Object.keys(value.actors).length)
+    fail("classification lookup contains unused actors.");
+  value.months.sort((a, b) => a.metadata.month.localeCompare(b.metadata.month));
   return value;
-}
-
-export function loadReports(sources: ReportSource[]): MonthlyReport[] {
-  if (!sources.length) throw new Error("Choose at least one monthly report.");
-  const reports = sources.map(parseReport);
-  const repository = reports[0]!.metadata.repository_node_id;
-  const months = new Set<string>();
-  const classifications = new Map<string, Classification>();
-  for (const [index, report] of reports.entries()) {
-    const fail = (message: string): never => {
-      throw new Error(`${sources[index]!.name}: ${message}`);
-    };
-    if (report.metadata.repository_node_id !== repository)
-      fail("all reports must belong to the same repository node ID.");
-    if (months.has(report.metadata.month))
-      fail(`duplicate report for ${report.metadata.month}.`);
-    months.add(report.metadata.month);
-    for (const actor of report.actors) {
-      const previous = classifications.get(actor.key);
-      if (previous && previous !== actor.classification)
-        fail(`conflicting classifications for actor ${actor.key}.`);
-      classifications.set(actor.key, actor.classification);
-    }
-  }
-  return reports.sort((a, b) =>
-    a.metadata.month.localeCompare(b.metadata.month),
-  );
 }
 
 export async function loadManifest(
@@ -144,48 +176,14 @@ export async function loadManifest(
   baseUrl: string,
   fetcher: typeof fetch = fetch,
   signal?: AbortSignal,
-): Promise<MonthlyReport[]> {
-  const manifestUrl = new URL(input, baseUrl);
-  if (!["http:", "https:"].includes(manifestUrl.protocol))
+): Promise<Manifest> {
+  const url = new URL(input, baseUrl);
+  if (!["http:", "https:"].includes(url.protocol))
     throw new Error("Use an HTTP or HTTPS manifest URL.");
-  const response = await fetcher(manifestUrl.href, {
+  const response = await fetcher(url.href, {
     credentials: "omit",
     ...(signal ? { signal } : {}),
   });
   if (!response.ok) throw new Error(`Manifest: HTTP ${response.status}.`);
-  let manifest: unknown;
-  try {
-    manifest = await response.json();
-  } catch {
-    throw new Error("Manifest: invalid JSON.");
-  }
-  if (
-    typeof manifest !== "object" ||
-    manifest === null ||
-    !("files" in manifest) ||
-    !Array.isArray(manifest.files) ||
-    !manifest.files.length ||
-    !manifest.files.every((file) => typeof file === "string" && file.trim())
-  ) {
-    throw new Error(
-      'Manifest must contain a nonempty "files" array of report paths.',
-    );
-  }
-  // Resolve against the final URL so redirects to directory URLs work as expected.
-  const files = manifest.files as string[];
-  const sources = await Promise.all(
-    files.map(async (file) => {
-      const url = new URL(file, response.url || manifestUrl.href);
-      if (!["http:", "https:"].includes(url.protocol))
-        throw new Error(`${file}: use an HTTP or HTTPS report URL.`);
-      const reportResponse = await fetcher(url.href, {
-        credentials: "omit",
-        ...(signal ? { signal } : {}),
-      });
-      if (!reportResponse.ok)
-        throw new Error(`${file}: HTTP ${reportResponse.status}.`);
-      return { name: file, text: await reportResponse.text() };
-    }),
-  );
-  return loadReports(sources);
+  return parseManifest({ name: "Manifest", text: await response.text() });
 }

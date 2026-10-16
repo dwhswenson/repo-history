@@ -1,0 +1,187 @@
+{
+  "actors": {
+    "B_bot": "bot",
+    "U_author": "human",
+    "U_performer": "human",
+    "git:email:b570f308b3fa3badb2c9eff5583f76ca8988ddde915a41d1b74465f507d182f4": "unresolved_git",
+    "git:name:11ab89b0bbeeb7f5778466c8a2eefb39ad1b4008ebfaa0364baed0b8fb69542c": "unresolved_git"
+  },
+  "months": [
+    {
+      "metadata": {
+        "collection_finished_at": "2024-03-02T12:05:00Z",
+        "collection_started_at": "2024-03-02T12:00:00Z",
+        "coverage_limitations": [
+          "Titles and review states reflect collection-time metadata."
+        ],
+        "month": "2024-02",
+        "month_end": "2024-03-01T00:00:00Z",
+        "month_start": "2024-02-01T00:00:00Z",
+        "ongoing": false
+      },
+      "summaries": {
+        "actor_counts": {
+          "B_bot": {
+            "commit": 0,
+            "issue_closed": 0,
+            "issue_comment": 0,
+            "issue_opened": 0,
+            "issue_reopened": 0,
+            "pr_conversation_comment": 1,
+            "pr_inline_review_comment": 1,
+            "pr_merged": 0,
+            "pr_opened": 0,
+            "pr_review": 0
+          },
+          "U_author": {
+            "commit": 1,
+            "issue_closed": 0,
+            "issue_comment": 0,
+            "issue_opened": 1,
+            "issue_reopened": 0,
+            "pr_conversation_comment": 0,
+            "pr_inline_review_comment": 0,
+            "pr_merged": 0,
+            "pr_opened": 1,
+            "pr_review": 0
+          },
+          "U_performer": {
+            "commit": 0,
+            "issue_closed": 2,
+            "issue_comment": 0,
+            "issue_opened": 0,
+            "issue_reopened": 2,
+            "pr_conversation_comment": 0,
+            "pr_inline_review_comment": 1,
+            "pr_merged": 1,
+            "pr_opened": 0,
+            "pr_review": 1
+          },
+          "git:email:b570f308b3fa3badb2c9eff5583f76ca8988ddde915a41d1b74465f507d182f4": {
+            "commit": 1,
+            "issue_closed": 0,
+            "issue_comment": 0,
+            "issue_opened": 0,
+            "issue_reopened": 0,
+            "pr_conversation_comment": 0,
+            "pr_inline_review_comment": 0,
+            "pr_merged": 0,
+            "pr_opened": 0,
+            "pr_review": 0
+          },
+          "git:name:11ab89b0bbeeb7f5778466c8a2eefb39ad1b4008ebfaa0364baed0b8fb69542c": {
+            "commit": 1,
+            "issue_closed": 0,
+            "issue_comment": 0,
+            "issue_opened": 0,
+            "issue_reopened": 0,
+            "pr_conversation_comment": 0,
+            "pr_inline_review_comment": 0,
+            "pr_merged": 0,
+            "pr_opened": 0,
+            "pr_review": 0
+          }
+        },
+        "distinct_actors": {
+          "bot": 1,
+          "human": 2,
+          "total": 5,
+          "unresolved_git": 2
+        },
+        "distinct_actors_by_type": {
+          "commit": {
+            "bot": 0,
+            "human": 1,
+            "total": 3,
+            "unresolved_git": 2
+          },
+          "issue_closed": {
+            "bot": 0,
+            "human": 1,
+            "total": 1,
+            "unresolved_git": 0
+          },
+          "issue_comment": {
+            "bot": 0,
+            "human": 0,
+            "total": 0,
+            "unresolved_git": 0
+          },
+          "issue_opened": {
+            "bot": 0,
+            "human": 1,
+            "total": 1,
+            "unresolved_git": 0
+          },
+          "issue_reopened": {
+            "bot": 0,
+            "human": 1,
+            "total": 1,
+            "unresolved_git": 0
+          },
+          "pr_conversation_comment": {
+            "bot": 1,
+            "human": 0,
+            "total": 1,
+            "unresolved_git": 0
+          },
+          "pr_inline_review_comment": {
+            "bot": 1,
+            "human": 1,
+            "total": 2,
+            "unresolved_git": 0
+          },
+          "pr_merged": {
+            "bot": 0,
+            "human": 1,
+            "total": 1,
+            "unresolved_git": 0
+          },
+          "pr_opened": {
+            "bot": 0,
+            "human": 1,
+            "total": 1,
+            "unresolved_git": 0
+          },
+          "pr_review": {
+            "bot": 0,
+            "human": 1,
+            "total": 1,
+            "unresolved_git": 0
+          }
+        },
+        "repository_counts": {
+          "commit": 2,
+          "issue_closed": 2,
+          "issue_comment": 1,
+          "issue_opened": 1,
+          "issue_reopened": 2,
+          "pr_conversation_comment": 1,
+          "pr_inline_review_comment": 2,
+          "pr_merged": 1,
+          "pr_opened": 1,
+          "pr_review": 1
+        },
+        "unattributed_by_type": {
+          "commit": 0,
+          "issue_closed": 0,
+          "issue_comment": 1,
+          "issue_opened": 0,
+          "issue_reopened": 0,
+          "pr_conversation_comment": 0,
+          "pr_inline_review_comment": 0,
+          "pr_merged": 0,
+          "pr_opened": 0,
+          "pr_review": 0
+        },
+        "unattributed_total": 1
+      }
+    }
+  ],
+  "repository": {
+    "full_name": "example/project",
+    "node_id": "R_example",
+    "url": "https://github.com/example/project"
+  },
+  "schema_version": "1"
+}

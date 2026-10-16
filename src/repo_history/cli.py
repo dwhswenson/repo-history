@@ -15,6 +15,7 @@ from .backfill import (
 )
 from .collection import collect_month
 from .errors import GitHubAPIError, RateLimitError
+from .manifest import write_manifest
 from .writing import _check_directory, write_report
 
 LOG = logging.getLogger(__name__)
@@ -83,6 +84,30 @@ def _parser(backfilling: bool) -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "manifest":
+        parser = argparse.ArgumentParser(
+            prog="repo-history manifest",
+            description="Build a self-contained visualization manifest offline.",
+        )
+        parser.add_argument("--input-directory", required=True, type=Path)
+        parser.add_argument("--output", type=Path)
+        verbosity = parser.add_mutually_exclusive_group()
+        verbosity.add_argument("--quiet", action="store_true")
+        verbosity.add_argument("--verbose", action="store_true")
+        args = parser.parse_args(argv[1:])
+        try:
+            if args.verbose:
+                print(
+                    f"DEBUG: Validating monthly reports in {args.input_directory}",
+                    file=sys.stderr,
+                )
+            path = write_manifest(args.input_directory, output_path=args.output)
+            if not args.quiet:
+                print(path, flush=True)
+            return 0
+        except (ValueError, OSError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
     backfilling = bool(argv and argv[0] == "backfill")
     parser = _parser(backfilling)
     args = parser.parse_args(argv[1:] if backfilling else argv)

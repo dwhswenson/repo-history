@@ -103,7 +103,7 @@ Document these limitations:
 - Preserve null actors and reasons. For inline comments missing publication timestamps, fall back to creation time only when publication is otherwise confirmed, recording the fallback.
 - Collection is not a transactional GitHub snapshot; concurrent changes may appear on a later rerun.
 
-Persistent caching, incremental synchronization, cumulative aggregation, visualization, and scheduling are deferred.
+Persistent caching, incremental synchronization, and scheduling are deferred. The visualizer computes cumulative aggregation from independently versioned, offline-generated summary manifests; full monthly reports remain the collection contract.
 
 ## PR-sized implementation phases
 

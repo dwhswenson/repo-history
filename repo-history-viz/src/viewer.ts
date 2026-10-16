@@ -4,11 +4,12 @@ import {
   ACTIVITY_TYPES,
   loadManifest,
   nextMonth,
-  loadReports,
+  parseManifest,
   type ActivityType,
   type Classification,
-  type MonthlyReport,
-  type ReportSource,
+  type Manifest,
+  type MonthSummary,
+  type ManifestSource,
 } from "./report.js";
 import { aggregate, type ViewState, type PlotData } from "./series.js";
 import { chartCsv } from "./csv.js";
@@ -38,16 +39,16 @@ export function createViewer(
   <main>
     <p id="configuration-error" class="error card" role="alert" hidden></p>
     <section class="loader card" aria-labelledby="load-heading">
-      <div><h2 id="load-heading">Load your reports</h2><p>Explore one repository’s monthly GitHub activity.</p></div>
+      <div><h2 id="load-heading">Load your manifest</h2><p>Explore one repository’s monthly GitHub activity.</p></div>
       <div class="load-options">
-        <label class="file-button">Choose JSON files<input id="files" type="file" accept=".json,application/json" multiple aria-label="Choose monthly JSON reports"></label>
+        <label class="file-button">Choose manifest JSON<input id="files" type="file" accept=".json,application/json" aria-label="Choose manifest JSON"></label>
         <span class="or">or</span>
         <form id="manifest-form"><label for="manifest">Hosted manifest URL</label><div class="url-row"><input id="manifest" type="text" placeholder="https://example.org/reports/manifest.json" required><button id="load-url" type="submit">Load URL</button></div></form>
       </div>
       <p id="load-status" role="status" aria-live="polite">Local files are processed in your browser.</p>
       <p id="load-error" class="error" role="alert" hidden></p>
     </section>
-    <section id="empty" class="empty card"><div class="empty-icon" aria-hidden="true">▥</div><h2>A clearer view of repository activity</h2><p>Choose monthly reports or load a hosted manifest to compare contributions and discover how your contributor community grows.</p><div class="empty-tags"><span>Monthly activity</span><span>Cumulative trends</span><span>Unique contributors</span></div></section>
+    <section id="empty" class="empty card"><div class="empty-icon" aria-hidden="true">▥</div><h2>A clearer view of repository activity</h2><p>Choose a manifest file or load a hosted manifest to compare contributions and discover how your contributor community grows.</p><div class="empty-tags"><span>Monthly activity</span><span>Cumulative trends</span><span>Unique contributors</span></div></section>
     <section id="dashboard" hidden>
       <div class="repository-heading"><div><p class="eyebrow">REPOSITORY HISTORY</p><h2 id="repository-name"></h2></div><p id="report-summary"></p></div>
       <div class="workspace">
@@ -84,7 +85,8 @@ export function createViewer(
     end: "",
   };
   let measures: Measure[] = [];
-  let reports: MonthlyReport[] = [];
+  let reports: MonthSummary[] = [];
+  let manifest: Manifest | undefined;
   let months: string[] = [];
   let generation = 0;
   let request: AbortController | undefined;
@@ -117,8 +119,9 @@ export function createViewer(
     if (message) notify("repo-history-error", { message });
   }
 
-  function showDataset(incoming: MonthlyReport[]) {
-    reports = incoming;
+  function showDataset(incoming: Manifest) {
+    manifest = incoming;
+    reports = incoming.months;
     const first = reports[0]!.metadata.month;
     const last = reports.at(-1)!.metadata.month;
     months = [];
@@ -134,8 +137,7 @@ export function createViewer(
     end.value = String(months.length - 1);
     element("empty").hidden = true;
     element("dashboard").hidden = false;
-    element("repository-name").textContent =
-      reports.at(-1)!.metadata.repository_full_name;
+    element("repository-name").textContent = manifest!.repository.full_name;
     element("report-summary").textContent =
       `${reports.length} monthly report${reports.length === 1 ? "" : "s"} · ${first} — ${last}`;
     render();
@@ -157,35 +159,33 @@ export function createViewer(
     element<HTMLButtonElement>("load-url").disabled = false;
   }
 
-  async function load(
-    action: (signal: AbortSignal) => Promise<MonthlyReport[]>,
-  ) {
+  async function load(action: (signal: AbortSignal) => Promise<Manifest>) {
     cancel();
     const current = generation;
     request = new AbortController();
     files.disabled = true;
     element<HTMLButtonElement>("load-url").disabled = true;
     setMessage("load-error", "");
-    setMessage("load-status", "Loading and validating reports…");
+    setMessage("load-status", "Loading and validating manifest…");
     try {
       const incoming = await action(request.signal);
       if (current !== generation) return;
       showDataset(incoming);
       setMessage("load-status", "");
       notify("repo-history-load", {
-        repository: reports.at(-1)!.metadata.repository_full_name,
+        repository: manifest!.repository.full_name,
         months: reports.map((report) => report.metadata.month),
       });
     } catch (error) {
       if (current !== generation) return;
       const message =
-        error instanceof Error ? error.message : "Unable to load reports.";
+        error instanceof Error ? error.message : "Unable to load manifest.";
       setMessage("load-error", message);
       setMessage(
         "load-status",
         reports.length
           ? "The previous dataset is still available."
-          : "Unable to load reports.",
+          : "Unable to load manifest.",
       );
       notify("repo-history-error", { message });
       throw error;
@@ -207,17 +207,10 @@ export function createViewer(
   }
 
   files.addEventListener("change", () => {
-    const selected = [...(files.files || [])];
-    if (selected.length)
+    const selected = files.files?.[0];
+    if (selected)
       void load(async () =>
-        loadReports(
-          await Promise.all(
-            selected.map(async (file) => ({
-              name: file.name,
-              text: await file.text(),
-            })),
-          ),
-        ),
+        parseManifest({ name: selected.name, text: await selected.text() }),
       ).catch(() => {});
   });
   element("manifest-form").addEventListener("submit", (event) => {
@@ -299,7 +292,7 @@ export function createViewer(
     selection.style.left = `${lastIndex ? (start.valueAsNumber / lastIndex) * 100 : 0}%`;
     selection.style.right = `${lastIndex ? 100 - (end.valueAsNumber / lastIndex) * 100 : 0}%`;
     start.style.zIndex = start.valueAsNumber === lastIndex ? "4" : "2";
-    const data = aggregate(reports, state);
+    const data = aggregate(manifest!, state);
     plot = data;
     const cumulative = state.mode === "cumulative";
     const measureLabel = {
@@ -320,7 +313,7 @@ export function createViewer(
     element("chart-note").textContent = balance
       ? "Net change from zero at the selected start month, not the repository’s total open items. Issues: opened + reopened − closed. PRs: opened − merged; reports omit PR closes without merging and PR reopens. Negative values are possible."
       : totalContributors
-        ? `${cumulative ? "Unique credited identities across all contribution types since the selected start month." : "Unique credited identities active across all contribution types in each month."} Each person counts once, even when contributing in multiple types. Contributor identity filters apply.`
+        ? `${cumulative ? "Unique credited identities across all contribution types since the selected start month." : "Unique credited identities active across all contribution types in each month."} This includes everyone from commits to comments. Each identity counts once, even when contributing in multiple types.`
         : contributors
           ? `${cumulative ? "Unique credited identities since the selected start month." : "Side-by-side bars show unique credited identities per contribution type in each month."} Combined counts deduplicate across selected types.`
           : state.metric === "commits"
@@ -381,9 +374,10 @@ export function createViewer(
   }
 
   function download(url: string, extension: string) {
-    const repository = reports
-      .at(-1)!
-      .metadata.repository_full_name.replace(/[^a-zA-Z0-9_-]/g, "-");
+    const repository = manifest!.repository.full_name.replace(
+      /[^a-zA-Z0-9_-]/g,
+      "-",
+    );
     const link = document.createElement("a");
     link.download = `${repository}-${state.metric}-${state.mode}-${state.start}-to-${state.end}.${extension}`;
     link.href = url;
@@ -456,8 +450,8 @@ export function createViewer(
 
   return {
     loadUrl,
-    loadSources: (sources: ReportSource[]) =>
-      load(async () => loadReports(sources)),
+    loadSource: (source: ManifestSource) =>
+      load(async () => parseManifest(source)),
     cancel,
     setMeasures,
     disconnect() {

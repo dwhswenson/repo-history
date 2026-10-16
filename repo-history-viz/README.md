@@ -1,6 +1,6 @@
 # Repository history visualization
 
-`<repo-history-viz>` is a framework-independent Web Component for monthly v1 JSON reports produced by `repo-history`. It includes activity comparisons, monthly bars, cumulative lines, unique contributor counts, month-range controls, and CSV data downloads. Chart.js, validation schema, and styles are bundled. No backend or GitHub credentials are needed.
+`<repo-history-viz>` is a framework-independent Web Component for self-contained summary manifests produced offline by `repo-history`. It includes activity comparisons, monthly bars, cumulative lines, unique contributor counts, month-range controls, and CSV data downloads. Chart.js, manifest validation schema, and styles are bundled. No backend or GitHub credentials are needed.
 
 ## Use in any static site
 
@@ -15,13 +15,17 @@ Build from this repository with `npm ci && npm run build` inside `repo-history-v
 ></repo-history-viz>
 ```
 
-Serve a manifest alongside your reports:
+Generate a manifest from validated monthly reports, then publish only the manifest and visualizer bundle:
 
-```json
-{ "files": ["2024-01.json", "2024-02.json", "2024-03.json"] }
+```sh
+repo-history manifest --input-directory reports
+# Optional destination:
+repo-history manifest --input-directory reports --output public/reports/manifest.json
 ```
 
-Report paths resolve relative to the manifest's final URL; relative manifest URLs resolve against the host document's base URL. Use paths appropriate to your site's deployment subpath. Cross-origin manifests and reports require CORS; fetches omit credentials. Local file selection processes files in browser memory without uploading them. Published full reports can include contributor Git names and emails.
+The manifest contains a repository identity, one shared actor-classification lookup, and monthly summaries plus coverage metadata. It omits individual events and actor profile fields. Hosted loading makes one credential-free HTTP(S) request; cross-origin manifests require CORS. Relative manifest URLs resolve against the host document's base URL. Local file selection reads one manifest in browser memory without uploading it.
+
+Regenerate the manifest explicitly after adding, replacing, or deleting monthly reports. Collection and backfill do not update it automatically. Source reports must remain unchanged during generation. The manifest is atomically replaced only after every source report and the completed manifest validate.
 
 See `examples/embed.html` for a complete host page.
 
@@ -49,7 +53,7 @@ A reusable wrapper is provided in `examples/astro/RepositoryHistory.astro`. The 
 
 ## Hugo
 
-Copy `dist/repo-history-viz.js` to `static/js/repo-history-viz.js`. Put your manifest and reports in `static/reports/`. Copy `examples/hugo/layouts/shortcodes/repo-history.html` into your site's `layouts/shortcodes/`, then embed it in content:
+Copy `dist/repo-history-viz.js` to `static/js/repo-history-viz.js`. Put your generated manifest in `static/reports/`. Copy `examples/hugo/layouts/shortcodes/repo-history.html` into your site's `layouts/shortcodes/`, then embed it in content:
 
 ```go-html-template
 {{< repo-history manifest="reports/manifest.json" measures="commits github-activities" >}}
@@ -72,7 +76,7 @@ Each instance has an open shadow root, independent controls, data, and chart. Ho
 For explicit registration or programmatic loading:
 
 ```ts
-import { defineRepoHistoryViz, type ReportSource } from "repo-history-viz";
+import { defineRepoHistoryViz, type ManifestSource } from "repo-history-viz";
 
 defineRepoHistoryViz(); // Idempotent.
 await customElements.whenDefined("repo-history-viz");
@@ -80,13 +84,14 @@ const viewer = document.querySelector("repo-history-viz")!;
 viewer.setAttribute("measures", "commits total-contributors");
 await viewer.loadManifest("/reports/manifest.json");
 
-const sources: ReportSource[] = [
-  { name: "2024-02.json", text: JSON.stringify(monthlyReport) },
-];
-await viewer.loadReports(sources);
+const source: ManifestSource = {
+  name: "manifest.json",
+  text: JSON.stringify(summaryManifest),
+};
+await viewer.loadManifestSource(source);
 ```
 
-Call methods after the element is connected. Both return `Promise<void>`, reject on failure, and retain the previous dataset on failure. The latest load supersedes earlier loads; superseded or disconnected loads are cancelled without an error event and their promises resolve without changing data. Successful replacement resets the range to all loaded months and preserves other controls. `loadManifest()` does not change the attribute.
+Call methods after the element is connected. Both loading methods return `Promise<void>`, reject on failure, and retain the previous dataset on failure. The latest load supersedes earlier loads; superseded or disconnected loads are cancelled without an error event and their promises resolve without changing data. Successful replacement resets the range to all loaded months and preserves other controls. `loadManifest()` does not change the attribute. `Manifest`, `MonthSummary`, and `ManifestSource` are exported TypeScript types.
 
 Events bubble and are composed, so the host document can listen:
 
@@ -115,7 +120,7 @@ Use **Download PNG** above the chart to save its current plot, axes, and legend 
 ## Counting and validation
 
 - Activities count each recorded event once, including co-authored commits, bots, and unattributed events.
-- Contributors are unique non-null credited actor keys. Contextual subject authors are excluded. Humans and unresolved Git identities are selected by default; classification controls affect contributor counts only.
+- Contributors are unique non-null credited actor keys. Contextual subject authors are excluded. Humans and unresolved Git identities are selected by default; classification controls affect contributor counts and GitHub activity counts.
 - The Total contributors measure shows one deduplicated series across all contribution types, independent of contribution type selections. Monthly bars count identities active that month; cumulative lines union identities since the selected start month. Contributor identity filters apply to both.
 - Combined activity counts sum events. Combined contributor counts union identities across selected types. Contributor series overlap and must not be added together.
 - Measure is a dropdown: Commits, GitHub Activities (all selected event types except commits), Contributors by type, Total contributors, and Issue / PR balance. Only controls relevant to the selected measure are shown.
@@ -124,7 +129,7 @@ Use **Download PNG** above the chart to save its current plot, axes, and legend 
 - The month range uses a double-ended slider with one-month steps and live chart updates. Drag either handle, click the track to move the nearest endpoint, or focus a handle and use the arrow keys. Handles cannot cross; “All available months” resets both endpoints. A single-report range disables the handles.
 - Empty reports are zero activity; absent reports are gaps. Cumulative totals cover loaded months only and resume from the last observed total. Ongoing months are partial snapshots.
 - Unresolved Git identities are estimates; the viewer does not infer identity merges. Stable keys survive account renames.
-- Reports must pass the shared v1 schema, share one repository node ID, have unique months, and reference valid credited actors. Repository renames are accepted. Conflicting actor classifications are rejected. A load succeeds only if all reports validate.
+- Manifests must pass the shared visualization-manifest v1 schema, have unique months and valid summary actor references, and contain internally consistent counts and populations. The offline generator validates full source reports, rejects mixed repositories and conflicting participating actor classifications, and uses the latest reporting month’s repository name. The browser validates the entire manifest before replacing the dataset.
 
 ## Development, builds, and distribution
 
@@ -158,7 +163,7 @@ Build outputs:
 
 The package is prepared for npm publication but is not published automatically. Before a registry release, confirm the package name/version with the project owner, run the checks above, inspect `npm pack --dry-run`, then publish through the project's release process.
 
-Browser tests cover file and manifest loading, chart controls, range validation, mobile layout, isolated instances, disconnect/reconnect, changing manifests, events, and the built standalone bundle. Browser tests build the package automatically before exercising packaged assets. Set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to reuse an existing Chromium executable. Browser output is ignored under `test-results/`.
+Browser tests cover local and hosted manifest loading, chart controls, range validation, mobile layout, isolated instances, disconnect/reconnect, changing manifests, events, and the built standalone bundle. Browser tests build the package automatically before exercising packaged assets. Set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to reuse an existing Chromium executable. Browser output is ignored under `test-results/`.
 
 GitHub Activities supports the same identity filter defaults as contributor counts: humans and undetermined actors included, known bots excluded. Events are classified by their credited performer (including the closer or merger), with missing actors counted as Undetermined. The filter applies to monthly and cumulative charts and their downloads. Commit counts and issue / PR balance are unaffected.
 

@@ -17,6 +17,7 @@ from .errors import (
 )
 from .history import collect_history, history_to_months
 from .identities import git_identity_key, unresolved_git_actor
+from .manifest import build_manifest, write_manifest
 from .models import (
     ACTIVITY_TYPES,
     Activity,
@@ -49,6 +50,8 @@ from .validation import load_schema, validate_report
 from .writing import write_report
 
 __all__ = [
+    "build_manifest",
+    "write_manifest",
     "collect_history",
     "history_to_months",
     "RepositoryHistory",

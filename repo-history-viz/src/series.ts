@@ -3,7 +3,7 @@ import {
   ACTIVITY_TYPES,
   type ActivityType,
   type Classification,
-  type MonthlyReport,
+  type Manifest,
   nextMonth,
 } from "./report.js";
 
@@ -38,10 +38,7 @@ export interface PlotData {
   partial: string[];
 }
 
-export function aggregate(
-  reports: MonthlyReport[],
-  state: ViewState,
-): PlotData {
+export function aggregate(manifest: Manifest, state: ViewState): PlotData {
   if (
     !/^\d{4}-(0[1-9]|1[0-2])$/.test(state.start) ||
     !/^\d{4}-(0[1-9]|1[0-2])$/.test(state.end) ||
@@ -55,7 +52,7 @@ export function aggregate(
     if (month === state.end) break;
   }
   const byMonth = new Map(
-    reports.map((report) => [report.metadata.month, report]),
+    manifest.months.map((report) => [report.metadata.month, report]),
   );
   if (state.metric === "balance") {
     if (state.mode !== "cumulative")
@@ -78,16 +75,10 @@ export function aggregate(
         continue;
       }
       if (report.metadata.ongoing) partial.push(month);
-      for (const activity of report.activities) {
-        if (
-          activity.type === "issue_opened" ||
-          activity.type === "issue_reopened"
-        )
-          totals.issues++;
-        if (activity.type === "issue_closed") totals.issues--;
-        if (activity.type === "pr_opened") totals.prs++;
-        if (activity.type === "pr_merged") totals.prs--;
-      }
+      const counts = report.summaries.repository_counts;
+      totals.issues +=
+        counts.issue_opened + counts.issue_reopened - counts.issue_closed;
+      totals.prs += counts.pr_opened - counts.pr_merged;
       series.forEach((item) => item.values.push(totals[item.key]));
     }
     return { months, series, missing, partial };
@@ -130,41 +121,29 @@ export function aggregate(
       continue;
     }
     if (report.metadata.ongoing) partial.push(month);
-    const classes = new Map(
-      report.actors.map((actor) => [actor.key, actor.classification]),
-    );
     const counts = new Map(keys.map((key) => [key, 0]));
     const actors = new Map(keys.map((key) => [key, new Set<string>()]));
-    for (const activity of report.activities) {
-      if (!types.includes(activity.type)) continue;
-      if (state.metric === "github-activities") {
-        // Missing performers belong to Undetermined; count each event once.
-        const matches = activity.credits.length
-          ? activity.credits.some((credit) =>
-              state.classifications.includes(
-                credit.actor_key === null
-                  ? "unresolved_git"
-                  : (classes.get(credit.actor_key) ?? "unresolved_git"),
-              ),
-            )
-          : state.classifications.includes("unresolved_git");
-        if (!matches) continue;
-      }
+    for (const type of types) {
       const targets: (ActivityType | "combined")[] = totalContributors
         ? ["combined"]
         : state.combined && state.metric !== "commits"
-          ? [activity.type, "combined"]
-          : [activity.type];
+          ? [type, "combined"]
+          : [type];
+      const entries = Object.entries(report.summaries.actor_counts).filter(
+        ([key, values]) =>
+          values[type] > 0 &&
+          state.classifications.includes(manifest.actors[key]!),
+      );
+      const count =
+        state.metric === "github-activities"
+          ? entries.reduce((sum, [, values]) => sum + values[type], 0) +
+            (state.classifications.includes("unresolved_git")
+              ? report.summaries.unattributed_by_type[type]
+              : 0)
+          : report.summaries.repository_counts[type];
       for (const key of targets) {
-        counts.set(key, counts.get(key)! + 1);
-        for (const credit of activity.credits) {
-          if (
-            credit.actor_key !== null &&
-            state.classifications.includes(classes.get(credit.actor_key)!)
-          ) {
-            actors.get(key)!.add(credit.actor_key);
-          }
-        }
+        counts.set(key, counts.get(key)! + count);
+        for (const [actor] of entries) actors.get(key)!.add(actor);
       }
     }
     for (const item of series) {

@@ -1,0 +1,10 @@
+{
+  "name": "openfe-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/prepare-demo.mjs",
+    "prestart": "npm run build",
+    "start": "node scripts/serve.mjs"
+  }
+}

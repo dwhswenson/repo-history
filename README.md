@@ -234,12 +234,11 @@ ancestor when intermediate timestamps are unusually old. Full issue/PR discovery
 still uses this buffered commit query. Counts support trend reporting and annual
 summaries rather than exhaustive historical audits.
 
-New reports record the actual strategy in `metadata.commit_history` (`bounded`).
+Reports record the actual strategy in `metadata.commit_history` (`bounded`).
 If buffered dates overflow or exceed GraphQL's documented supported range
 (1970-01-01 through 2099-12-13), the collector internally selects unbounded
-history (`full`) and applies the same local month filter. Legacy v1 reports
-without this optional provenance field remain readable; their strategy is
-unknown. Empty repositories produce zero commits without a history request.
+history (`full`) and applies the same local month filter. When the optional
+provenance field is absent, the strategy is unknown. Empty repositories produce zero commits without a history request.
 
 ### Experimental bounded parent discovery
 
@@ -529,3 +528,18 @@ in `metadata.coverage_limitations`.
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+## Visualization manifests
+
+After collecting monthly reports, generate a self-contained summary manifest offline:
+
+```sh
+repo-history manifest --input-directory reports
+repo-history manifest --input-directory reports --output public/reports/manifest.json
+```
+
+Publish the resulting `manifest.json` and the `repo-history-viz` bundle. The browser loads only the manifest. It contains monthly summaries, stable actor keys with classifications, and coverage metadata; full event records and actor profile fields remain in the monthly files. The generator validates every source report and atomically replaces the manifest. Rebuild explicitly after adding, replacing, or deleting reports; collection and backfill remain independent. Do not modify source reports concurrently with generation.
+
+The Python APIs are `build_manifest(reports) -> dict` and `write_manifest(report_directory, *, output_path=None) -> Path`. The packaged contract is `schemas/viz-manifest-v1.json`, independently versioned from monthly reports. The generator rejects empty directories, wrong month filenames, mixed repositories, and conflicting classifications for participating actors. Only immediate monthly report files are read; unrelated files and subdirectories are ignored.
+
+See [the visualizer documentation](repo-history-viz/README.md) for the `loadManifestSource()` API and embedding examples.

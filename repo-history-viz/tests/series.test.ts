@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
+import { eventAggregate } from "./event-reference";
 import { aggregate, type ViewState } from "../src/series";
-import { ACTIVITY_TYPES, loadReports } from "../src/report";
-import { fixture, source } from "./fixtures";
+import { ACTIVITY_TYPES } from "../src/report";
+import {
+  fixture,
+  source,
+  fromReports as loadReports,
+  toManifest,
+} from "./fixtures";
 
 const defaults: ViewState = {
   metric: "activities",
@@ -288,14 +294,97 @@ describe("monthly and cumulative aggregation", () => {
   });
   it("crosses year boundaries and handles the maximum four-digit year", () => {
     expect(
-      aggregate([], { ...defaults, start: "2023-12", end: "2024-01" }).months,
+      aggregate(
+        {
+          schema_version: "1",
+          repository: {
+            node_id: "r",
+            full_name: "o/r",
+            url: "https://example.org",
+          },
+          actors: {},
+          months: [],
+        },
+        { ...defaults, start: "2023-12", end: "2024-01" },
+      ).months,
     ).toEqual(["2023-12", "2024-01"]);
     expect(
-      aggregate([], { ...defaults, start: "9999-12", end: "9999-12" }).months,
+      aggregate(
+        {
+          schema_version: "1",
+          repository: {
+            node_id: "r",
+            full_name: "o/r",
+            url: "https://example.org",
+          },
+          actors: {},
+          months: [],
+        },
+        { ...defaults, start: "9999-12", end: "9999-12" },
+      ).months,
     ).toEqual(["9999-12"]);
   });
   it("rejects invalid and reversed ranges", () => {
     expect(() => plot({ start: "2024-04" })).toThrow("valid start month");
     expect(() => plot({ start: "" })).toThrow("valid start month");
   });
+});
+
+it("matches the event reference for every measure, identity filter, mode and selected ranges", () => {
+  const first = fixture();
+  const empty = fixture("2024-04", true);
+  const last = fixture("2024-05");
+  last.metadata.ongoing = true;
+  last.actors.find((a) => a.key === "U_author")!.key = "U_new";
+  for (const activity of last.activities)
+    for (const credit of activity.credits) {
+      if (credit.actor_key === "U_author") credit.actor_key = "U_new";
+    }
+  const full = [first, empty, last];
+  const manifest = toManifest(full);
+  const selections = [
+    [],
+    ...ACTIVITY_TYPES.map((t) => [t]),
+    ["commit", "pr_opened"],
+    ACTIVITY_TYPES,
+  ] as ViewState["types"][];
+  for (const metric of [
+    "activities",
+    "commits",
+    "github-activities",
+    "contributors",
+    "total-contributors",
+    "balance",
+  ] as const) {
+    for (const mode of ["monthly", "cumulative"] as const) {
+      if (metric === "balance" && mode === "monthly") continue;
+      for (let mask = 0; mask < 8; mask++) {
+        const classifications = (
+          ["human", "bot", "unresolved_git"] as const
+        ).filter((_, i) => mask & (1 << i));
+        for (const types of selections)
+          for (const combined of [false, true]) {
+            for (const [start, end] of [
+              ["2024-02", "2024-05"],
+              ["2024-03", "2024-05"],
+              ["2024-05", "2024-05"],
+            ]) {
+              const state: ViewState = {
+                ...defaults,
+                metric,
+                mode,
+                classifications,
+                types,
+                combined,
+                start: start!,
+                end: end!,
+              };
+              expect(aggregate(manifest, state)).toEqual(
+                eventAggregate(full, state),
+              );
+            }
+          }
+      }
+    }
+  }
 });

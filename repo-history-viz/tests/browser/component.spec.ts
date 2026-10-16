@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { source } from "../fixtures";
+import { manifestSource as source, combinedSource, fixture } from "../fixtures";
 
 test("instances isolate controls, charts, and CSS and survive reconnection", async ({
   page,
@@ -26,12 +26,12 @@ test("instances isolate controls, charts, and CSS and survive reconnection", asy
   });
   const first = page.locator("repo-history-viz").first();
   const second = page.locator("#second");
-  await first.getByLabel("Choose monthly JSON reports").setInputFiles({
+  await first.getByLabel("Choose manifest JSON").setInputFiles({
     name: "2024-02.json",
     mimeType: "application/json",
     buffer: Buffer.from(source().text),
   });
-  await second.getByLabel("Choose monthly JSON reports").setInputFiles({
+  await second.getByLabel("Choose manifest JSON").setInputFiles({
     name: "2024-03.json",
     mimeType: "application/json",
     buffer: Buffer.from(source("2024-03", true).text),
@@ -89,15 +89,9 @@ test("manifest attributes load automatically, supersede pending loads, and emit 
 }) => {
   await page.route("**/reports/slow.json", async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 400));
-    await route.fulfill({ json: { files: ["2024-02.json"] } });
+    await route.fulfill({ body: source().text });
   });
   await page.route("**/reports/fast.json", (route) =>
-    route.fulfill({ json: { files: ["2024-03.json"] } }),
-  );
-  await page.route("**/reports/2024-02.json", (route) =>
-    route.fulfill({ body: source().text }),
-  );
-  await page.route("**/reports/2024-03.json", (route) =>
     route.fulfill({ body: source("2024-03").text }),
   );
   await page.goto("/");
@@ -125,7 +119,7 @@ test("manifest attributes load automatically, supersede pending loads, and emit 
     "aria-valuetext",
     "Mar 2024",
   );
-  await expect(page.getByLabel("Choose monthly JSON reports")).toBeHidden();
+  await expect(page.getByLabel("Choose manifest JSON")).toBeHidden();
   await expect
     .poll(() =>
       page.evaluate(
@@ -157,7 +151,7 @@ test("built standalone bundle works without source files and duplicate registrat
     }),
   );
   await page.goto("/embed.html");
-  await expect(page.getByLabel("Choose monthly JSON reports")).toBeVisible();
+  await expect(page.getByLabel("Choose manifest JSON")).toBeVisible();
   const events = await page.evaluate(async (text) => {
     const host = document.querySelector("repo-history-viz")!;
     const { defineRepoHistoryViz } = await import(
@@ -171,7 +165,7 @@ test("built standalone bundle works without source files and duplicate registrat
         { once: true },
       ),
     );
-    await host.loadReports([{ name: "report.json", text }]);
+    await host.loadManifestSource({ name: "manifest.json", text });
     return loaded;
   }, source().text);
   expect(events).toEqual({
@@ -184,7 +178,7 @@ test("built standalone bundle works without source files and duplicate registrat
     try {
       await document
         .querySelector("repo-history-viz")!
-        .loadReports([{ name: "bad.json", text: "{" }]);
+        .loadManifestSource({ name: "bad.json", text: "{" });
     } catch (error) {
       return (error as Error).message;
     }
@@ -198,7 +192,7 @@ test("production demo registers the component after bundling", async ({
   page,
 }) => {
   await page.goto("/demo-dist/index.html");
-  await expect(page.getByLabel("Choose monthly JSON reports")).toBeVisible();
+  await expect(page.getByLabel("Choose manifest JSON")).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Activity over time" }),
   ).toHaveCount(0);
@@ -222,7 +216,7 @@ test("measures are required, validated, ordered, and updated without losing repo
     'Set the "measures" attribute',
   );
   await host.evaluate(async (element, text) => {
-    await element.loadReports([{ name: "report.json", text }]);
+    await element.loadManifestSource({ name: "manifest.json", text });
   }, source().text);
   await expect(host.locator("#dashboard")).toBeHidden();
   await expect(measure.locator("option")).toHaveCount(0);
@@ -293,9 +287,9 @@ test("changing measures preserves the selected month range", async ({
   const host = page.locator("repo-history-viz");
   await host.evaluate(
     async (element, sources) => {
-      await element.loadReports(sources);
+      await element.loadManifestSource(sources);
     },
-    [source(), source("2024-03")],
+    combinedSource([fixture(), fixture("2024-03")]),
   );
   await host.locator("#start").focus();
   await page.keyboard.press("ArrowRight");
@@ -305,4 +299,26 @@ test("changing measures preserves the selected month range", async ({
     "Mar 2024",
   );
   await expect(host.locator("#chart-title")).toHaveText("Monthly commits");
+});
+
+test("hosted datasets load with one manifest request and no monthly requests", async ({
+  page,
+}) => {
+  const requested: string[] = [];
+  await page.route("**/reports/**", async (route) => {
+    requested.push(new URL(route.request().url()).pathname);
+    if (requested.at(-1) === "/reports/manifest.json") {
+      await route.fulfill({
+        body: combinedSource([fixture(), fixture("2024-03")]).text,
+      });
+    } else {
+      await route.abort();
+    }
+  });
+  await page.goto("/");
+  await page.locator("repo-history-viz").evaluate(async (element) => {
+    await element.loadManifest("/reports/manifest.json");
+  });
+  await expect(page.locator("#repository-name")).toHaveText("example/project");
+  expect(requested).toEqual(["/reports/manifest.json"]);
 });
