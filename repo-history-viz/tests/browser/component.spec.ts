@@ -16,6 +16,10 @@ test("instances isolate controls, charts, and CSS and survive reconnection", asy
     button.textContent = "Host button";
     document.body.append(button);
     const second = document.createElement("repo-history-viz");
+    second.setAttribute(
+      "measures",
+      "github-activities commits contributors total-contributors balance",
+    );
     second.id = "second";
     second.style.width = "360px";
     document.body.append(second);
@@ -149,7 +153,7 @@ test("built standalone bundle works without source files and duplicate registrat
   await page.route("**/embed.html", (route) =>
     route.fulfill({
       contentType: "text/html",
-      body: `<!doctype html><html><body><p id="host">A host page</p><repo-history-viz></repo-history-viz><script type="module" src="/dist/repo-history-viz.js"></script><script type="module" src="/dist/repo-history-viz.js?second"></script></body></html>`,
+      body: `<!doctype html><html><body><p id="host">A host page</p><repo-history-viz measures="github-activities commits contributors total-contributors balance"></repo-history-viz><script type="module" src="/dist/repo-history-viz.js"></script><script type="module" src="/dist/repo-history-viz.js?second"></script></body></html>`,
     }),
   );
   await page.goto("/embed.html");
@@ -201,4 +205,104 @@ test("production demo registers the component after bundling", async ({
   await expect(page.locator(".page-header, footer, #range-label")).toHaveCount(
     0,
   );
+});
+
+test("measures are required, validated, ordered, and updated without losing reports", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const host = page.locator("repo-history-viz");
+  const measure = host.getByLabel("Measure", { exact: true });
+  await host.evaluate((element) => {
+    element.removeAttribute("measures");
+    element.setAttribute("hide-loader", "");
+  });
+  await expect(host.locator("#configuration-error")).toBeVisible();
+  await expect(host.locator("#configuration-error")).toContainText(
+    'Set the "measures" attribute',
+  );
+  await host.evaluate(async (element, text) => {
+    await element.loadReports([{ name: "report.json", text }]);
+  }, source().text);
+  await expect(host.locator("#dashboard")).toBeHidden();
+  await expect(measure.locator("option")).toHaveCount(0);
+  await host.evaluate((element) => {
+    element.setAttribute(
+      "measures",
+      "  commits\n total-contributors commits  ",
+    );
+  });
+  await expect(host.locator("#configuration-error")).toBeHidden();
+  await expect(measure.locator("option")).toHaveText([
+    "Commits",
+    "Total contributors",
+  ]);
+  await expect(measure).toHaveValue("commits");
+  await expect(host.locator("#chart-title")).toHaveText("Monthly commits");
+  await measure.selectOption("total-contributors");
+  await host.evaluate((element) =>
+    element.setAttribute("measures", "balance total-contributors"),
+  );
+  await expect(measure).toHaveValue("total-contributors");
+  await host.evaluate((element) => element.setAttribute("measures", "balance"));
+  await expect(measure).toHaveValue("balance");
+  await expect(host.locator("#chart-title")).toHaveText(
+    "Cumulative issue / PR balance",
+  );
+  const error = await host.evaluate((element) => {
+    let detail: unknown;
+    element.addEventListener(
+      "repo-history-error",
+      (event) => {
+        detail = (event as CustomEvent).detail;
+      },
+      { once: true },
+    );
+    element.setAttribute("measures", "commits typo");
+    return detail;
+  });
+  expect(error).toEqual({
+    message:
+      "Unknown measures: typo. Supported measures: commits, github-activities, contributors, total-contributors, balance.",
+  });
+  await expect(host.locator("#configuration-error")).toContainText("typo");
+  await expect(host.locator("#dashboard")).toBeHidden();
+  await expect(measure.locator("option")).toHaveCount(0);
+  await host.evaluate((element) => element.setAttribute("measures", "  "));
+  await expect(host.locator("#configuration-error")).toContainText(
+    "at least one measure",
+  );
+  await host.evaluate((element) => {
+    element.remove();
+    element.setAttribute("measures", "contributors");
+    document.body.append(element);
+  });
+  await expect(host.locator("#dashboard")).toBeVisible();
+  await expect(measure).toHaveValue("contributors");
+  await expect(host.locator("#repository-name")).toHaveText("example/project");
+  await expect(host.locator("#start")).toHaveAttribute(
+    "aria-valuetext",
+    "Feb 2024",
+  );
+});
+
+test("changing measures preserves the selected month range", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const host = page.locator("repo-history-viz");
+  await host.evaluate(
+    async (element, sources) => {
+      await element.loadReports(sources);
+    },
+    [source(), source("2024-03")],
+  );
+  await host.locator("#start").focus();
+  await page.keyboard.press("ArrowRight");
+  await host.evaluate((element) => element.setAttribute("measures", "commits"));
+  await expect(host.locator("#start")).toHaveAttribute(
+    "aria-valuetext",
+    "Mar 2024",
+  );
+  await expect(host.locator("#chart-title")).toHaveText("Monthly commits");
 });

@@ -10,6 +10,7 @@ Build from this repository with `npm ci && npm run build` inside `repo-history-v
 <script type="module" src="/assets/repo-history-viz.js"></script>
 <repo-history-viz
   manifest="/reports/manifest.json"
+  measures="github-activities commits contributors total-contributors balance"
   hide-loader
 ></repo-history-viz>
 ```
@@ -38,7 +39,7 @@ For Astro, install the package (or a local packed tarball), then use a normal pr
 ---
 const manifest = `${import.meta.env.BASE_URL}reports/manifest.json`;
 ---
-<repo-history-viz manifest={manifest} hide-loader></repo-history-viz>
+<repo-history-viz manifest={manifest} measures="commits github-activities" hide-loader></repo-history-viz>
 <script>
   import "repo-history-viz/register";
 </script>
@@ -51,17 +52,20 @@ A reusable wrapper is provided in `examples/astro/RepositoryHistory.astro`. The 
 Copy `dist/repo-history-viz.js` to `static/js/repo-history-viz.js`. Put your manifest and reports in `static/reports/`. Copy `examples/hugo/layouts/shortcodes/repo-history.html` into your site's `layouts/shortcodes/`, then embed it in content:
 
 ```go-html-template
-{{< repo-history manifest="reports/manifest.json" >}}
+{{< repo-history manifest="reports/manifest.json" measures="commits github-activities" >}}
 ```
 
 The shortcode uses Hugo's `relURL` for deployment subpaths. Hugo only needs the prebuilt bundle, so its build does not require Node.
 
 ## Component API
 
-| Attribute     | Behavior                                                                                                                                                 |
-| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `manifest`    | Automatically loads the given manifest on connection and when changed. Removing or emptying it cancels a pending request and retains the displayed data. |
-| `hide-loader` | Boolean attribute hiding the file picker and URL controls; status and errors remain visible.                                                             |
+| Attribute     | Behavior                                                                                                                                                                                                        |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `measures`    | Required whitespace-separated list: `commits`, `github-activities`, `contributors`, `total-contributors`, `balance`. Only listed measures are offered, in the specified order; the first is initially selected. |
+| `manifest`    | Automatically loads the given manifest on connection and when changed. Removing or emptying it cancels a pending request and retains the displayed data.                                                        |
+| `hide-loader` | Boolean attribute hiding the file picker and URL controls; status and errors remain visible.                                                                                                                    |
+
+Missing, empty, or unknown `measures` values show a configuration error and no chart, and emit `repo-history-error`. There is no implicit default or wildcard. Duplicate names are included once. Changing the attribute updates the available measures without reloading reports or resetting the month range; the current selection is retained if still enabled, otherwise the first listed measure is selected. Invalid configuration hides the chart while retaining reports, so correcting the attribute restores the viewer. Configuration errors remain visible with `hide-loader`.
 
 Each instance has an open shadow root, independent controls, data, and chart. Host-page CSS does not style its internals. Responsive layout follows the component's container width. Disconnecting aborts pending loads and destroys the chart; reconnecting redraws retained data and reloads a nonempty `manifest` attribute. Multiple instances can coexist on one page.
 
@@ -73,6 +77,7 @@ import { defineRepoHistoryViz, type ReportSource } from "repo-history-viz";
 defineRepoHistoryViz(); // Idempotent.
 await customElements.whenDefined("repo-history-viz");
 const viewer = document.querySelector("repo-history-viz")!;
+viewer.setAttribute("measures", "commits total-contributors");
 await viewer.loadManifest("/reports/manifest.json");
 
 const sources: ReportSource[] = [

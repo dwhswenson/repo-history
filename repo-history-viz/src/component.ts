@@ -6,7 +6,7 @@ const ElementBase = globalThis.HTMLElement ?? (class {} as typeof HTMLElement);
 
 /** Interactive monthly repository history, isolated in an open shadow root. */
 export class RepoHistoryViz extends ElementBase {
-  static observedAttributes = ["manifest"];
+  static observedAttributes = ["manifest", "measures"];
   private viewer?: ReturnType<typeof createViewer>;
 
   connectedCallback(): void {
@@ -18,7 +18,7 @@ export class RepoHistoryViz extends ElementBase {
         );
       });
     }
-    this.viewer.resume();
+    this.viewer.setMeasures(this.getAttribute("measures"));
     const manifest = this.getAttribute("manifest");
     if (manifest?.trim()) void this.viewer.loadUrl(manifest).catch(() => {});
   }
@@ -28,11 +28,15 @@ export class RepoHistoryViz extends ElementBase {
   }
 
   attributeChangedCallback(
-    _name: string,
+    name: string,
     previous: string | null,
     value: string | null,
   ): void {
     if (previous === value || !this.isConnected || !this.viewer) return;
+    if (name === "measures") {
+      this.viewer.setMeasures(value);
+      return;
+    }
     if (value?.trim()) void this.viewer.loadUrl(value).catch(() => {});
     else this.viewer.cancel();
   }

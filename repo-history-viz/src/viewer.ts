@@ -15,6 +15,15 @@ import { chartCsv } from "./csv.js";
 import { COLORS, renderChart } from "./chart.js";
 import type { Chart } from "chart.js";
 
+const MEASURES = {
+  commits: "Commits",
+  "github-activities": "GitHub Activities",
+  contributors: "Contributors by type",
+  "total-contributors": "Total contributors",
+  balance: "Issue / PR balance",
+} as const;
+type Measure = keyof typeof MEASURES;
+
 export function createViewer(
   root: ShadowRoot,
   notify: (type: string, detail: unknown) => void,
@@ -27,6 +36,7 @@ export function createViewer(
   root.append(app);
   app.innerHTML = `
   <main>
+    <p id="configuration-error" class="error card" role="alert" hidden></p>
     <section class="loader card" aria-labelledby="load-heading">
       <div><h2 id="load-heading">Load your reports</h2><p>Explore one repository’s monthly GitHub activity.</p></div>
       <div class="load-options">
@@ -43,7 +53,7 @@ export function createViewer(
       <div class="workspace">
         <aside class="controls card" aria-label="Chart controls">
           <fieldset id="month-controls"><legend>Month range</legend><div class="month-range-values"><label for="start">From<output id="start-label" for="start"></output></label><label for="end">Through<output id="end-label" for="end"></output></label></div><div id="month-range" class="month-range"><div class="month-range-track" aria-hidden="true"><span id="month-selection"></span></div><input id="start" type="range" min="0" max="0" step="1" value="0"><input id="end" type="range" min="0" max="0" step="1" value="0"></div><button id="reset-range" class="text-button" type="button">All available months</button></fieldset>
-          <fieldset><legend><label for="metric">Measure</label></legend><select id="metric"><option value="commits">Commits</option><option value="github-activities" selected>GitHub Activities</option><option value="contributors">Contributors by type</option><option value="total-contributors">Total contributors</option><option value="balance">Issue / PR balance</option></select></fieldset>
+          <fieldset><legend><label for="metric">Measure</label></legend><select id="metric"></select></fieldset>
           <fieldset><legend>Chart</legend><div class="segmented"><label><input type="radio" name="mode" value="monthly" checked><span>Monthly</span></label><label><input type="radio" name="mode" value="cumulative"><span>Cumulative</span></label></div></fieldset>
           <fieldset id="contribution-types"><legend>Contribution types</legend><div class="selection-actions"><button id="select-all" class="text-button" type="button">Select all</button><button id="select-none" class="text-button" type="button">Clear</button></div><div class="type-list">${ACTIVITY_TYPES.map((type, index) => `<label><input type="checkbox" name="activity" value="${type}" checked><span class="swatch" style="background:${COLORS[index]}"></span>${ACTIVITY_LABELS[type]}</label>`).join("")}</div><label class="combined"><input id="combined" type="checkbox">Show selected types combined</label></fieldset>
           <fieldset id="balance-types" hidden><legend>Show balance for</legend><label><input type="checkbox" name="balance-type" value="issues" checked>Issues</label><label><input type="checkbox" name="balance-type" value="prs" checked>Pull requests</label></fieldset>
@@ -73,6 +83,7 @@ export function createViewer(
     start: "",
     end: "",
   };
+  let measures: Measure[] = [];
   let reports: MonthlyReport[] = [];
   let months: string[] = [];
   let generation = 0;
@@ -84,6 +95,26 @@ export function createViewer(
     const target = element(id);
     target.textContent = message;
     target.hidden = !message;
+  }
+
+  function setMeasures(value: string | null) {
+    const requested = value?.trim().split(/\s+/).filter(Boolean) ?? [];
+    const unknown = requested.filter((key) => !Object.hasOwn(MEASURES, key));
+    const message = !requested.length
+      ? 'Set the "measures" attribute to explicitly enable at least one measure.'
+      : unknown.length
+        ? `Unknown measures: ${unknown.join(", ")}. Supported measures: ${Object.keys(MEASURES).join(", ")}.`
+        : "";
+    measures = message ? [] : ([...new Set(requested)] as Measure[]);
+    const select = element<HTMLSelectElement>("metric");
+    const previous = select.value;
+    select.replaceChildren(
+      ...measures.map((key) => new Option(MEASURES[key], key)),
+    );
+    if (measures.includes(previous as Measure)) select.value = previous;
+    setMessage("configuration-error", message);
+    render();
+    if (message) notify("repo-history-error", { message });
   }
 
   function showDataset(incoming: MonthlyReport[]) {
@@ -205,7 +236,14 @@ export function createViewer(
   }
 
   function render() {
-    if (!reports.length) return;
+    element("empty").hidden = !measures.length || reports.length > 0;
+    element("dashboard").hidden = !measures.length || !reports.length;
+    if (!measures.length || !reports.length) {
+      chart?.destroy();
+      chart = undefined;
+      plot = undefined;
+      return;
+    }
     state.metric = element<HTMLSelectElement>("metric")
       .value as ViewState["metric"];
     state.mode = checked<ViewState["mode"]>("mode")[0]!;
@@ -421,7 +459,7 @@ export function createViewer(
     loadSources: (sources: ReportSource[]) =>
       load(async () => loadReports(sources)),
     cancel,
-    resume: render,
+    setMeasures,
     disconnect() {
       cancel();
       chart?.destroy();
