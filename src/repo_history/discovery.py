@@ -5,7 +5,14 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import quote, urlencode
 
 from .errors import GraphQLError, TransportError
-from .queries import ISSUES_QUERY, PULL_REQUESTS_QUERY, parent_hydration_query
+from .queries import (
+    HISTORY_ISSUES_QUERY,
+    HISTORY_PARENT_PAGE_SIZE,
+    HISTORY_PULL_REQUESTS_QUERY,
+    ISSUES_QUERY,
+    PULL_REQUESTS_QUERY,
+    parent_hydration_query,
+)
 from .rest_pagination import iter_rest_list
 
 LOG = logging.getLogger(__name__)
@@ -28,7 +35,9 @@ def _timestamp(item, name):
         ) from None
 
 
-def discover_parents(client, repository, start, end, *, strategy):
+def discover_parents(
+    client, repository, start, end, *, strategy, include_activity=False
+):
     if strategy == "bounded":
         try:
             since = start - timedelta(seconds=1)
@@ -41,11 +50,15 @@ def discover_parents(client, repository, start, end, *, strategy):
             if issues and not repository.issues_enabled:
                 continue
             operation = "RepositoryIssues" if issues else "RepositoryPullRequests"
+            query = ISSUES_QUERY if issues else PULL_REQUESTS_QUERY
+            if include_activity:
+                query = HISTORY_ISSUES_QUERY if issues else HISTORY_PULL_REQUESTS_QUERY
             for item in client.iter_connection(
-                ISSUES_QUERY if issues else PULL_REQUESTS_QUERY,
+                query,
                 {"id": repository.repository_node_id},
                 operation_name=operation,
                 connection_path=("node", "issues" if issues else "pullRequests"),
+                page_size=HISTORY_PARENT_PAGE_SIZE if include_activity else 100,
             ):
                 yield issues, item, operation
         return

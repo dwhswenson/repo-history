@@ -442,3 +442,44 @@ def test_missing_or_failed_canonical_actor_resolution_fails(session, canonical):
     with pytest.raises(api.GitHubAPIError):
         collect(session, [history([commit()])])
     assert session.closed
+
+
+def test_embedded_commit_connections_log_first_page_and_continuations(session, caplog):
+    caplog.set_level("DEBUG", logger="repo_history.transport")
+    item = commit(
+        authors=page([], more=True, cursor="authors"),
+        parents=page([], more=True, cursor="parents"),
+    )
+    collect(
+        session,
+        [
+            history([item]),
+            connection("authors", [identity()]),
+            connection("parents", [{"oid": "c" * 40}]),
+        ],
+    )
+    messages = [record.getMessage() for record in caplog.records]
+    assert any(
+        "operation=CommitAuthors page=1 source=embedded" in message
+        for message in messages
+    )
+    assert any(
+        "operation=CommitAuthors page=2 attempt=1 status=200" in message
+        for message in messages
+    )
+    assert any(
+        "operation=CommitParents page=1 source=embedded" in message
+        for message in messages
+    )
+    assert any(
+        "operation=CommitParents page=2 attempt=1 status=200" in message
+        for message in messages
+    )
+    assert any(
+        "operation=CommitHistory page=1 attempt=1" in message for message in messages
+    )
+    assert all(
+        "page=" not in message
+        for message in messages
+        if "operation=CommitActor " in message
+    )

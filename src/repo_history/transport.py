@@ -37,6 +37,16 @@ def _parent_log_context(kind: str, number: int):
         _PARENT_CONTEXT.reset(token)
 
 
+def _log_embedded_page(operation: str, count: int, more: bool):
+    LOG.debug(
+        "GitHub operation=%s%s page=1 source=embedded nodes=%s has_next_page=%s",
+        operation,
+        _PARENT_CONTEXT.get(),
+        count,
+        more,
+    )
+
+
 @dataclass
 class _APIUsage:
     """Primary-budget points measured during this client lifetime."""
@@ -192,8 +202,12 @@ class GraphQLClient:
         cursor_variable: str = "after",
         page_size_variable: str = "first",
         page_size: int = 100,
+        start_page: int = 1,
     ) -> Iterator[dict[str, Any] | None]:
-        """Yield checked pages; callers must discard all results after any failure."""
+        """Yield checked pages; start_page sets local logging, never API variables.
+
+        Callers must discard all results after any failure.
+        """
         from .pagination import iter_connection
 
         return iter_connection(
@@ -205,9 +219,18 @@ class GraphQLClient:
             cursor_variable=cursor_variable,
             page_size_variable=page_size_variable,
             page_size=page_size,
+            start_page=start_page,
         )
 
-    def _execute(self, document, variables, *, operation_name, page_size_variable=None):
+    def _execute(
+        self,
+        document,
+        variables,
+        *,
+        operation_name,
+        page_size_variable=None,
+        page_number=None,
+    ):
         if self._closed:
             raise TransportError("client is closed", operation=operation_name)
         if not isinstance(document, str) or not document.strip():
@@ -217,6 +240,9 @@ class GraphQLClient:
         if not isinstance(variables, Mapping):
             raise ValueError("variables must be a mapping")
         values = dict(variables)
+        log_context = _PARENT_CONTEXT.get()
+        if page_number is not None:
+            log_context += f" page={page_number}"
         for attempt in range(1, self.max_attempts + 1):
             self._check_budget("graphql", operation_name)
             diagnostic = dict(operation=operation_name, attempts=attempt)
@@ -300,7 +326,7 @@ class GraphQLClient:
                     LOG.debug(
                         "GitHub operation=%s%s attempt=%s status=%s request_id=%s remaining=%s reset=%s retry_after=%s",
                         operation_name,
-                        _PARENT_CONTEXT.get(),
+                        log_context,
                         attempt,
                         status,
                         diagnostic["request_id"],
@@ -410,7 +436,7 @@ class GraphQLClient:
                 LOG.info(
                     "GitHub operation=%s%s attempt=%s page_size=%s",
                     operation_name,
-                    _PARENT_CONTEXT.get(),
+                    log_context,
                     attempt,
                     values[page_size_variable],
                 )
@@ -419,7 +445,7 @@ class GraphQLClient:
             LOG.info(
                 "GitHub operation=%s%s retry_after=%s attempt=%s",
                 operation_name,
-                _PARENT_CONTEXT.get(),
+                log_context,
                 2 ** (attempt - 1),
                 attempt,
             )

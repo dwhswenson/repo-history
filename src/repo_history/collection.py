@@ -24,7 +24,10 @@ from .models import (
     ReportMetadata,
     Subject,
 )
+from .pagination import iter_embedded_connection
 from .queries import (
+    HISTORY_PR_THREADS_QUERY,
+    HISTORY_THREAD_PAGE_SIZE,
     ISSUE_COMMENTS_QUERY,
     ISSUE_TIMELINE_QUERY,
     PR_COMMENTS_QUERY,
@@ -229,7 +232,9 @@ class _Records:
             self.actors[actor.key] = actor
 
 
-def _collect_parent(client, value, operation, start, end, records, *, issues):
+def _collect_parent(
+    client, value, operation, start, end, records, *, issues, initial_pages=False
+):
     parent = _object(value, operation)
     author = _actor(_field(parent, "author", operation), operation)
     subject = _subject(parent, "issue" if issues else "pull_request", author, operation)
@@ -255,20 +260,33 @@ def _collect_parent(client, value, operation, start, end, records, *, issues):
             operation,
         )
     with _parent_log_context("issue" if issues else "pr", subject.number):
-        _collect_timeline(client, subject, author, start, end, records, issues=issues)
-        _collect_comments(client, subject, author, start, end, records, issues=issues)
+        initial = parent if initial_pages else None
+        _collect_timeline(
+            client, subject, author, start, end, records, issues=issues, initial=initial
+        )
+        _collect_comments(
+            client, subject, author, start, end, records, issues=issues, initial=initial
+        )
         if not issues:
-            _collect_reviews(client, subject, author, start, end, records)
-            _collect_threads(client, subject, author, start, end, records)
+            _collect_reviews(
+                client, subject, author, start, end, records, initial=initial
+            )
+            _collect_threads(
+                client, subject, author, start, end, records, initial=initial
+            )
 
 
-def _collect_timeline(client, subject, author, start, end, records, *, issues):
+def _collect_timeline(
+    client, subject, author, start, end, records, *, issues, initial=None
+):
     operation = "IssueLifecycle" if issues else "PullRequestLifecycle"
-    events = client.iter_connection(
+    events = _nodes(
+        client,
         ISSUE_TIMELINE_QUERY if issues else PR_TIMELINE_QUERY,
-        {"id": subject.node_id},
-        operation_name=operation,
-        connection_path=("node", "timelineItems"),
+        operation,
+        subject.node_id,
+        "timelineItems",
+        initial=initial,
     )
     for value in events:
         event = _object(value, operation)
@@ -318,12 +336,23 @@ def _collect_timeline(client, subject, author, start, end, records, *, issues):
             )
 
 
-def _nodes(client, query, operation, node_id, field):
+def _nodes(client, query, operation, node_id, field, *, initial=None, page_size=100):
+    if initial is not None:
+        return iter_embedded_connection(
+            client,
+            _field(initial, field, operation),
+            query,
+            node_id,
+            field,
+            operation,
+            page_size=page_size,
+        )
     return client.iter_connection(
         query,
         {"id": node_id},
         operation_name=operation,
         connection_path=("node", field),
+        page_size=page_size,
     )
 
 
@@ -358,12 +387,16 @@ def _add_authored(
         )
 
 
-def _collect_comments(client, subject, author, start, end, records, *, issues):
+def _collect_comments(
+    client, subject, author, start, end, records, *, issues, initial=None
+):
     operation = "IssueComments" if issues else "PullRequestComments"
     query = ISSUE_COMMENTS_QUERY if issues else PR_COMMENTS_QUERY
     kind = "issue_comment" if issues else "pr_conversation_comment"
     metadata = IssueCommentMetadata if issues else PRConversationCommentMetadata
-    for value in _nodes(client, query, operation, subject.node_id, "comments"):
+    for value in _nodes(
+        client, query, operation, subject.node_id, "comments", initial=initial
+    ):
         item = _object(value, operation)
         occurred = _timestamp(item, operation)
         details = metadata(_string(item, "id", operation))
@@ -381,10 +414,10 @@ def _collect_comments(client, subject, author, start, end, records, *, issues):
         )
 
 
-def _collect_reviews(client, subject, author, start, end, records):
+def _collect_reviews(client, subject, author, start, end, records, *, initial=None):
     operation = "PullRequestReviews"
     for value in _nodes(
-        client, PR_REVIEWS_QUERY, operation, subject.node_id, "reviews"
+        client, PR_REVIEWS_QUERY, operation, subject.node_id, "reviews", initial=initial
     ):
         item = _object(value, operation)
         source_id = _string(item, "id", operation)
@@ -421,26 +454,51 @@ def _boolean(item, name, operation):
     return value
 
 
-def _collect_threads(client, subject, author, start, end, records):
+def _collect_threads(client, subject, author, start, end, records, *, initial=None):
     operation = "PullRequestReviewThreads"
     for value in _nodes(
-        client, PR_THREADS_QUERY, operation, subject.node_id, "reviewThreads"
+        client,
+        HISTORY_PR_THREADS_QUERY if initial is not None else PR_THREADS_QUERY,
+        operation,
+        subject.node_id,
+        "reviewThreads",
+        initial=initial,
+        page_size=HISTORY_THREAD_PAGE_SIZE if initial is not None else 100,
     ):
         thread = _object(value, operation)
         thread_id = _string(thread, "id", operation)
         resolved = _boolean(thread, "isResolved", operation)
         outdated = _boolean(thread, "isOutdated", operation)
         _collect_inline_comments(
-            client, subject, author, thread_id, resolved, outdated, start, end, records
+            client,
+            subject,
+            author,
+            thread_id,
+            resolved,
+            outdated,
+            start,
+            end,
+            records,
+            initial=thread if initial is not None else None,
         )
 
 
 def _collect_inline_comments(
-    client, subject, author, thread_id, resolved, outdated, start, end, records
+    client,
+    subject,
+    author,
+    thread_id,
+    resolved,
+    outdated,
+    start,
+    end,
+    records,
+    *,
+    initial=None,
 ):
     operation = "ReviewThreadComments"
     for value in _nodes(
-        client, THREAD_COMMENTS_QUERY, operation, thread_id, "comments"
+        client, THREAD_COMMENTS_QUERY, operation, thread_id, "comments", initial=initial
     ):
         item = _object(value, operation)
         source_id = _string(item, "id", operation)

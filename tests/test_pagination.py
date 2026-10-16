@@ -195,3 +195,136 @@ def test_size_one_resource_failure(client):
     with pytest.raises(api.QueryResourceError):
         list(iterate(client, page_size=1))
     assert len(client._session.calls) == 1
+
+
+def test_embedded_complete_page_requires_no_requests(client):
+    from repo_history.pagination import iter_embedded_connection
+
+    embedded = {
+        "nodes": [{"id": "a"}],
+        "pageInfo": {"hasNextPage": False, "endCursor": None},
+    }
+    assert list(
+        iter_embedded_connection(client, embedded, "unused", "parent", "items", "Test")
+    ) == [{"id": "a"}]
+    assert not client._session.calls
+
+
+def test_embedded_cursor_seeds_continuation_cycle_detection(client):
+    from repo_history.pagination import iter_embedded_connection
+
+    embedded = {
+        "nodes": [{"id": "a"}],
+        "pageInfo": {"hasNextPage": True, "endCursor": "initial"},
+    }
+    client._session.responses = [
+        Response(
+            {
+                "data": {
+                    "node": {
+                        "items": {
+                            "nodes": [{"id": "bad"}],
+                            "pageInfo": {"hasNextPage": True, "endCursor": "initial"},
+                        }
+                    }
+                }
+            }
+        )
+    ]
+    iterator = iter_embedded_connection(
+        client, embedded, "query Test { node { id } }", "parent", "items", "Test"
+    )
+    assert next(iterator) == {"id": "a"}
+    with pytest.raises(api.PaginationError, match="repeated"):
+        next(iterator)
+    assert client._session.calls[0][1]["json"]["variables"]["after"] == "initial"
+
+
+def test_page_logs_advance_after_success_and_stay_fixed_on_retry(client, caplog):
+    from repo_history.transport import _parent_log_context
+
+    caplog.set_level("DEBUG", logger="repo_history.transport")
+    client._session.responses = [
+        page([{"id": "a"}], True, "c1"),
+        Response(status=503),
+        page([{"id": "b"}], True, "c2"),
+        page([{"id": "c"}]),
+    ]
+    with _parent_log_context("pr", 87):
+        assert list(iterate(client)) == [{"id": "a"}, {"id": "b"}, {"id": "c"}]
+    messages = [r.getMessage() for r in caplog.records]
+    attempts = [
+        m.split(" page=", 1)[1].split(" status=", 1)[0]
+        for m in messages
+        if " status=" in m
+    ]
+    assert attempts == ["1 attempt=1", "2 attempt=1", "2 attempt=2", "3 attempt=1"]
+    assert all(" pr=87 " in m for m in messages)
+    assert any("page=2 retry_after=1 attempt=1" in m for m in messages)
+    assert all(
+        set(kwargs["json"]["variables"]) == {"after", "first"}
+        for _, kwargs in client._session.calls
+    )
+
+
+def test_embedded_first_page_and_continuation_logs_keep_parent_context(client, caplog):
+    from repo_history.pagination import iter_embedded_connection
+    from repo_history.transport import _parent_log_context
+
+    caplog.set_level("DEBUG", logger="repo_history.transport")
+    embedded = {
+        "nodes": [{"id": "a"}],
+        "pageInfo": {"hasNextPage": True, "endCursor": "c1"},
+    }
+    client._session.responses = [
+        Response(
+            {
+                "data": {
+                    "node": {
+                        "items": {
+                            "nodes": [{"id": "b"}],
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                        }
+                    }
+                }
+            }
+        )
+    ]
+    with _parent_log_context("issue", 42):
+        assert list(
+            iter_embedded_connection(
+                client,
+                embedded,
+                "query Test { node { id } }",
+                "parent",
+                "items",
+                "Test",
+            )
+        ) == [{"id": "a"}, {"id": "b"}]
+    messages = [r.getMessage() for r in caplog.records]
+    assert "issue=42 page=1 source=embedded nodes=1 has_next_page=True" in messages[0]
+    assert "issue=42 page=2 attempt=1 status=200" in messages[1]
+    assert len(client._session.calls) == 1
+
+
+def test_interleaved_connection_page_numbers_do_not_leak(client, caplog):
+    from repo_history.transport import _parent_log_context
+
+    caplog.set_level("DEBUG", logger="repo_history.transport")
+    client._session.responses = [page([{"id": "a"}], True, "outer"), page([]), page([])]
+    outer = iterate(client)
+    assert next(outer) == {"id": "a"}
+    with _parent_log_context("issue", 42):
+        assert list(iterate(client)) == []
+    assert list(outer) == []
+    messages = [r.getMessage() for r in caplog.records]
+    assert "page=1 attempt=1" in messages[0] and "issue=" not in messages[0]
+    assert "issue=42 page=1 attempt=1" in messages[1]
+    assert "page=2 attempt=1" in messages[2] and "issue=" not in messages[2]
+
+
+@pytest.mark.parametrize("start_page", [0, -1, True, 1.5, "2", None])
+def test_invalid_start_page_before_network(client, start_page):
+    with pytest.raises(ValueError, match="start_page"):
+        list(iterate(client, start_page=start_page))
+    assert not client._session.calls

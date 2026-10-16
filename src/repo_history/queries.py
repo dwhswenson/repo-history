@@ -330,11 +330,17 @@ PR_COMMENTS_QUERY = _connection_query(
     "...ConversationComment",
     ACTOR_FRAGMENT + COMMENT_FRAGMENT,
 )
+REVIEW_FIELDS = "id submittedAt state url author { ...LifecycleActor }"
+INLINE_COMMENT_FIELDS = (
+    "id createdAt publishedAt state url author { ...LifecycleActor } "
+    "pullRequestReview { id }"
+)
+
 PR_REVIEWS_QUERY = _connection_query(
     "PullRequestReviews",
     "PullRequest",
     "reviews",
-    "id submittedAt state url author { ...LifecycleActor }",
+    REVIEW_FIELDS,
     ACTOR_FRAGMENT,
 )
 PR_THREADS_QUERY = _connection_query(
@@ -347,9 +353,110 @@ THREAD_COMMENTS_QUERY = _connection_query(
     "ReviewThreadComments",
     "PullRequestReviewThread",
     "comments",
-    "id createdAt publishedAt state url author { ...LifecycleActor } "
-    "pullRequestReview { id }",
+    INLINE_COMMENT_FIELDS,
     ACTOR_FRAGMENT,
+)
+
+
+# Bound nested fan-out independently of the outer parent page. Continuations
+# use the existing lean queries, except threads which also embed comment pages.
+HISTORY_PARENT_PAGE_SIZE = 20
+HISTORY_ACTIVITY_PAGE_SIZE = 20
+HISTORY_THREAD_PAGE_SIZE = 10
+HISTORY_THREAD_FIELDS = f"""
+id isResolved isOutdated
+comments(first: {HISTORY_ACTIVITY_PAGE_SIZE}) {{
+  nodes {{ {INLINE_COMMENT_FIELDS} }}
+  pageInfo {{ ...ForwardPageInfo }}
+}}
+"""
+
+HISTORY_PR_THREADS_QUERY = _connection_query(
+    "PullRequestReviewThreads",
+    "PullRequest",
+    "reviewThreads",
+    HISTORY_THREAD_FIELDS,
+    ACTOR_FRAGMENT,
+)
+
+_HISTORY_ISSUE_FRAGMENT = f"""
+fragment HistoryIssue on Issue {{
+  ...LifecycleIssue
+  timelineItems(first: {HISTORY_ACTIVITY_PAGE_SIZE}, itemTypes: [CLOSED_EVENT, REOPENED_EVENT]) {{
+    nodes {{ __typename ...LifecycleClosure ...LifecycleReopening }}
+    pageInfo {{ ...ForwardPageInfo }}
+  }}
+  comments(first: {HISTORY_ACTIVITY_PAGE_SIZE}) {{
+    nodes {{ ...ConversationComment }}
+    pageInfo {{ ...ForwardPageInfo }}
+  }}
+}}
+"""
+
+_HISTORY_PR_FRAGMENT = f"""
+fragment HistoryPullRequest on PullRequest {{
+  ...LifecyclePullRequest
+  timelineItems(first: {HISTORY_ACTIVITY_PAGE_SIZE}, itemTypes: [MERGED_EVENT]) {{
+    nodes {{ __typename ...LifecycleMerge }}
+    pageInfo {{ ...ForwardPageInfo }}
+  }}
+  comments(first: {HISTORY_ACTIVITY_PAGE_SIZE}) {{
+    nodes {{ ...ConversationComment }}
+    pageInfo {{ ...ForwardPageInfo }}
+  }}
+  reviews(first: {HISTORY_ACTIVITY_PAGE_SIZE}) {{
+    nodes {{ {REVIEW_FIELDS} }}
+    pageInfo {{ ...ForwardPageInfo }}
+  }}
+  reviewThreads(first: {HISTORY_THREAD_PAGE_SIZE}) {{
+    nodes {{ {HISTORY_THREAD_FIELDS} }}
+    pageInfo {{ ...ForwardPageInfo }}
+  }}
+}}
+"""
+
+HISTORY_ISSUES_QUERY = (
+    ACTOR_FRAGMENT
+    + ISSUE_SUBJECT_FRAGMENT
+    + ISSUE_EVENTS_FRAGMENT
+    + COMMENT_FRAGMENT
+    + PAGE_INFO_FRAGMENT
+    + _HISTORY_ISSUE_FRAGMENT
+    + """
+query RepositoryIssues($id: ID!, $first: Int!, $after: String) {
+  rateLimit { cost }
+  node(id: $id) {
+    ... on Repository {
+      issues(first: $first, after: $after) {
+        nodes { ...HistoryIssue }
+        pageInfo { ...ForwardPageInfo }
+      }
+    }
+  }
+}
+"""
+)
+
+HISTORY_PULL_REQUESTS_QUERY = (
+    ACTOR_FRAGMENT
+    + PR_SUBJECT_FRAGMENT
+    + MERGE_EVENT_FRAGMENT
+    + COMMENT_FRAGMENT
+    + PAGE_INFO_FRAGMENT
+    + _HISTORY_PR_FRAGMENT
+    + """
+query RepositoryPullRequests($id: ID!, $first: Int!, $after: String) {
+  rateLimit { cost }
+  node(id: $id) {
+    ... on Repository {
+      pullRequests(first: $first, after: $after) {
+        nodes { ...HistoryPullRequest }
+        pageInfo { ...ForwardPageInfo }
+      }
+    }
+  }
+}
+"""
 )
 
 

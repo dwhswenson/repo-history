@@ -13,6 +13,7 @@ from .queries import (
     COMMIT_HISTORY_QUERY,
     COMMIT_PARENTS_QUERY,
 )
+from .transport import _log_embedded_page
 
 BUFFER_SECONDS = 86400
 FILTER_MIN = datetime(1970, 1, 1, tzinfo=timezone.utc)
@@ -98,6 +99,7 @@ def _nested(client, item, field, query, operation):
         raise PaginationError(
             "malformed initial commit connection", operation=operation
         )
+    _log_embedded_page(operation, len(nodes), info["hasNextPage"])
     yield from nodes
     if info["hasNextPage"]:
         continuation = client.iter_connection(
@@ -106,6 +108,7 @@ def _nested(client, item, field, query, operation):
             operation_name=operation,
             connection_path=("node", field),
             page_size=10,
+            start_page=2,
         )
         for node in continuation:
             yield _object(node, operation)

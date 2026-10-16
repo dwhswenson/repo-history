@@ -59,10 +59,17 @@ def _collect_history(
                 )
             records = _Records()
             for issues, parent, operation in discover_parents(
-                client, repository, None, None, strategy="full"
+                client, repository, None, None, strategy="full", include_activity=True
             ):
                 _collect_parent(
-                    client, parent, operation, None, None, records, issues=issues
+                    client,
+                    parent,
+                    operation,
+                    None,
+                    None,
+                    records,
+                    issues=issues,
+                    initial_pages=True,
                 )
             collect_commits(client, repository, None, None, records)
             limitations = COVERAGE_LIMITATIONS

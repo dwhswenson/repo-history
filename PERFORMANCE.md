@@ -15,18 +15,28 @@ client also shares canonical commit actor resolution across the complete run.
 Destination reports are scanned once per backfill, avoiding repeated directory
 validation as months are written.
 
+History-mode parent queries now include the first activity pages, with inline
+comment pages embedded in review threads. Complete connections need no follow-up
+request. Overflowing connections retain independent cursors and pagination; later
+thread pages also embed comment pages. Parent pages are capped at 20, activity
+first pages at 20, and thread pages at 10 to bound nested fan-out.
+
 The deterministic `tests/test_history.py` fixture covers all activity types and
 parent/nested pagination, with one synthetic GraphQL point per response. For the
 same three-month output (January–March 2024):
 
 | Path | Requests | Synthetic GraphQL points |
 |---|---:|---:|
-| History-first backfill | 23 | 23 |
+| History-first backfill, embedded first pages | 16 | 16 |
+| Previous history-first backfill, separate first pages | 23 | 23 |
 | Monthly backfill, full parent discovery | 58 | 58 |
 
-This is a 60% reduction in fixture requests/points. These synthetic costs do not
-predict GitHub's actual query costs. A sample local run took 0.079 s versus
-0.083 s; mocked latency is negligible and these timings establish no live speedup.
+Embedding first pages reduces fixture requests by 30% versus the previous
+history collector and 72% versus independent monthly collection. These synthetic
+costs do not predict GitHub's actual query costs: bundled queries may cost more
+than one point each. A sample local run took 0.084 s versus 0.085 s for monthly
+collection; mocked latency is negligible and these timings establish no live
+speedup. Measure live points per returned activity as well as request counts.
 Reproduce the comparison with:
 
 ```text

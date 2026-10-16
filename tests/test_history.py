@@ -55,8 +55,43 @@ class HistorySession(Session):
             result = history()
         else:
             result = deepcopy(self.pages[key])
+        if "fragment HistoryIssue on Issue" in payload["query"]:
+            self.embed_parents(result, "issues", issues=True)
+        if "fragment HistoryPullRequest on PullRequest" in payload["query"]:
+            self.embed_parents(result, "pullRequests", issues=False)
+        if (
+            operation == "PullRequestReviewThreads"
+            and "comments(first:" in payload["query"]
+        ):
+            self.embed_threads(result.body["data"]["node"]["reviewThreads"])
         result.body.setdefault("data", {})["rateLimit"] = {"cost": 1}
         return result
+
+    def embed_parents(self, response, field, *, issues):
+        for item in response.body["data"]["node"][field]["nodes"]:
+            connections = {
+                "timelineItems": "IssueLifecycle" if issues else "PullRequestLifecycle",
+                "comments": "IssueComments" if issues else "PullRequestComments",
+            }
+            if not issues:
+                connections.update(
+                    reviews="PullRequestReviews",
+                    reviewThreads="PullRequestReviewThreads",
+                )
+            for name, operation in connections.items():
+                item[name] = deepcopy(
+                    self.pages[(operation, item["id"], None)].body["data"]["node"][name]
+                )
+            if not issues:
+                self.embed_threads(item["reviewThreads"])
+
+    def embed_threads(self, connection):
+        for item in connection["nodes"]:
+            item["comments"] = deepcopy(
+                self.pages[("ReviewThreadComments", item["id"], None)].body["data"][
+                    "node"
+                ]["comments"]
+            )
 
     def add(self, operation, node_id, response, after=None):
         self.pages[(operation, node_id, after)] = response
@@ -478,7 +513,7 @@ def test_bad_creation_closes_client(session, created):
 
 def test_retry_counts_and_costs_on_failed_collection(session, caplog):
     caplog.set_level(logging.INFO, logger="repo_history.history")
-    session.failures[("IssueLifecycle", "I", None)] = errors("MAX_NODE_LIMIT_EXCEEDED")
+    session.failures[("IssueLifecycle", "I", "e")] = errors("MAX_NODE_LIMIT_EXCEEDED")
     with pytest.raises(api.QueryResourceError):
         collect()
     assert f"GraphQL requests={len(session.calls)}" in caplog.text
@@ -520,9 +555,14 @@ def test_parent_numbers_in_nested_request_logs(session, caplog, mode):
             assert " pr=87 " in message and " issue=" not in message
         else:
             assert " issue=" not in message and " pr=" not in message
+    expected_pr = (
+        pr_operations
+        if mode == "monthly"
+        else pr_operations - {"PullRequestLifecycle", "PullRequestComments"}
+    )
     assert (
         issue_operations
-        | pr_operations
+        | expected_pr
         | {
             "RepositoryLookup",
             "RepositoryIssues",
@@ -531,3 +571,161 @@ def test_parent_numbers_in_nested_request_logs(session, caplog, mode):
         }
         <= seen
     )
+
+
+def test_embedded_connections_fetch_only_their_continuations(session):
+    snapshot = collect()
+    nested = [
+        p
+        for p in requests(session)
+        if p["operationName"]
+        in {
+            "IssueLifecycle",
+            "IssueComments",
+            "PullRequestLifecycle",
+            "PullRequestComments",
+            "PullRequestReviews",
+            "PullRequestReviewThreads",
+            "ReviewThreadComments",
+        }
+    ]
+    assert {(p["operationName"], p["variables"]["after"]) for p in nested} == {
+        ("IssueLifecycle", "e"),
+        ("IssueComments", "c"),
+        ("PullRequestReviews", "v"),
+        ("PullRequestReviewThreads", "t"),
+        ("ReviewThreadComments", "tc"),
+    }
+    assert len(nested) == 5
+    assert {a.type for a in snapshot.activities} == set(api.ACTIVITY_TYPES)
+    parent_requests = [
+        p
+        for p in requests(session)
+        if p["operationName"] in {"RepositoryIssues", "RepositoryPullRequests"}
+    ]
+    assert all(p["variables"]["first"] == 20 for p in parent_requests)
+
+
+def test_all_nested_connections_and_later_threads_keep_paginating(session):
+    for operation, field in [
+        ("PullRequestLifecycle", "timelineItems"),
+        ("PullRequestComments", "comments"),
+    ]:
+        original = deepcopy(session.pages[(operation, "P", None)])
+        cursor = operation + "-next"
+        session.add(operation, "P", connection(field, more=True, cursor=cursor))
+        session.add(operation, "P", original, after=cursor)
+    session.add(
+        "PullRequestReviewThreads",
+        "P",
+        connection(
+            "reviewThreads", [thread("T_later", isResolved=False, isOutdated=False)]
+        ),
+        after="t",
+    )
+    session.add(
+        "ReviewThreadComments",
+        "T_later",
+        connection("comments", [inline("C_later")], more=True, cursor="later-comments"),
+    )
+    session.add(
+        "ReviewThreadComments",
+        "T_later",
+        connection("comments", [inline("C_reply")], more=True, cursor="last-comments"),
+        after="later-comments",
+    )
+    session.add(
+        "ReviewThreadComments",
+        "T_later",
+        connection("comments", [inline("C_last")]),
+        after="last-comments",
+    )
+    grouped = api.history_to_months(collect(), "2024-02", "2024-02")[0]
+    optimized_requests = requests(session)
+    assert any(
+        p["operationName"] == "ReviewThreadComments"
+        and p["variables"]["id"] == "T_later"
+        and p["variables"]["after"] == "later-comments"
+        for p in optimized_requests
+    )
+    assert not any(
+        p["operationName"] == "ReviewThreadComments" and p["variables"]["after"] is None
+        for p in optimized_requests
+    )
+    continuation = next(
+        p
+        for p in optimized_requests
+        if p["operationName"] == "PullRequestReviewThreads"
+    )
+    assert "comments(first:" in continuation["query"]
+    assert continuation["variables"]["first"] == 10
+    reference = api.collect_month("o", "r", 2024, 2, token="test", discovery="full")
+    assert grouped.activities == reference.activities
+    assert grouped.actors == reference.actors
+    assert grouped.summaries == reference.summaries
+    later = [
+        a
+        for a in grouped.activities
+        if a.id.endswith((":C_later", ":C_reply", ":C_last"))
+    ]
+    assert len(later) == 3
+    assert all(
+        a.metadata.thread_node_id == "T_later" and not a.metadata.resolved
+        for a in later
+    )
+
+
+@pytest.mark.parametrize(
+    "bad_page",
+    [
+        None,
+        {},
+        {"nodes": [], "pageInfo": {"hasNextPage": True, "endCursor": None}},
+        {"nodes": [], "pageInfo": {"hasNextPage": False, "endCursor": 12}},
+    ],
+)
+def test_malformed_embedded_page_fails_without_fetching_a_replacement(
+    session, bad_page
+):
+    response = session.pages[("IssueComments", "I", None)]
+    response.body["data"]["node"]["comments"] = bad_page
+    with pytest.raises(api.PaginationError):
+        collect()
+    assert session.closed
+    assert not any(p["operationName"] == "IssueComments" for p in requests(session))
+
+
+def test_missing_embedded_page_is_not_silently_treated_as_empty(session, monkeypatch):
+    embed = session.embed_parents
+
+    def incomplete(response, field, *, issues):
+        embed(response, field, issues=issues)
+        for item in response.body["data"]["node"][field]["nodes"]:
+            item.pop("comments")
+
+    monkeypatch.setattr(session, "embed_parents", incomplete)
+    with pytest.raises(api.GraphQLError, match="missing lifecycle field: comments"):
+        collect()
+    assert session.closed
+
+
+def test_parent_page_reduction_retains_embedded_child_limits(session, monkeypatch):
+    post = session.post
+    first = True
+
+    def oversized(endpoint, **kwargs):
+        nonlocal first
+        if first and kwargs["json"]["operationName"] == "RepositoryPullRequests":
+            first = False
+            session.calls.append((endpoint, deepcopy(kwargs)))
+            return errors("MAX_NODE_LIMIT_EXCEEDED")
+        return post(endpoint, **kwargs)
+
+    monkeypatch.setattr(session, "post", oversized)
+    collect()
+    parents = [
+        p for p in requests(session) if p["operationName"] == "RepositoryPullRequests"
+    ]
+    assert [p["variables"]["first"] for p in parents] == [20, 10, 10]
+    assert [p["variables"]["after"] for p in parents] == [None, None, "p"]
+    assert all("reviews(first: 20)" in p["query"] for p in parents)

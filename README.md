@@ -68,7 +68,11 @@ With Pixi, prefix commands with `pixi run`, for example
 
 Each successful month prints its saved path to stdout immediately. Progress and
 API usage go to stderr. `--verbose` includes debug diagnostics with `issue=N` or
-`pr=N` on relevant nested requests and retries; `--quiet` suppresses
+`pr=N` on relevant nested requests and retries. Paginated requests include a local
+`page=N` counter; retries keep the same number. Embedded first pages log
+`page=1 source=embedded` with item count and `has_next_page`; their continuation
+requests begin at page 2. Counters restart for each connection, including each
+thread's comments. `--quiet` suppresses
 paths and all diagnostics except errors. Exit codes are 0 for success, 2 for
 invalid arguments, and 1 for collection, validation, or filesystem failures.
 Rate-limit errors include available retry/reset guidance and stop the run.
@@ -142,8 +146,20 @@ snapshot with repository identity, `repository_created_at`, captured default
 branch/head, collection timestamps, coverage limitations, actors, and activities.
 It uses one client and one repository lookup, fully traverses accessible issue/PR
 connections and their nested history, and walks commits reachable from the
-captured default head **without date filters**. It writes no files and raises
-without returning a partial snapshot if collection fails.
+captured default head **without date filters**. Parent queries include the first
+pages of lifecycle events and conversation comments, plus reviews and review
+threads for PRs. Threads include their first comment page. Each nested connection
+has its own `pageInfo`; additional requests start at its returned cursor only
+when `hasNextPage` is true, including threads found on later thread pages.
+
+History queries request 20 parents per page, 20 items per activity connection,
+and 10 review threads per parent, bounding nested response sizes. Lean activity
+continuation queries request up to 100 items; thread continuation queries request
+10 threads with embedded comment pages. Existing resource-limit retries can
+reduce the outer page size. Monthly mode retains its independent queries.
+
+Collection writes no files and raises without returning a partial snapshot if
+collection fails.
 
 `history_to_months(history, start=None, end=None)` makes no network requests and
 returns validated `MonthlyReport` objects in chronological order. It groups by the
