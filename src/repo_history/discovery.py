@@ -17,6 +17,11 @@ from .rest_pagination import iter_rest_list
 
 LOG = logging.getLogger(__name__)
 OPERATION = "RepositoryParentDiscovery"
+BOUNDED_DISCOVERY_LIMITATION = (
+    "Experimental bounded parent discovery uses REST parent update timestamps; "
+    "activities that do not advance those timestamps may be omitted. "
+    "Completeness has not been established."
+)
 
 
 def _timestamp(item, name):
@@ -35,16 +40,22 @@ def _timestamp(item, name):
         ) from None
 
 
-def discover_parents(
-    client, repository, start, end, *, strategy, include_activity=False
-):
+def select_strategy(start, strategy):
+    """Select and log the actual parent-discovery strategy before traversal."""
     if strategy == "bounded":
         try:
-            since = start - timedelta(seconds=1)
+            start - timedelta(seconds=1)
         except OverflowError:
             LOG.info("Parent discovery selected full traversal: overlap underflow")
             strategy = "full"
     LOG.info("Parent discovery strategy=%s", strategy)
+    return strategy
+
+
+def discover_parents(
+    client, repository, start, end, *, strategy, include_activity=False
+):
+    """Traverse using the strategy already selected by select_strategy."""
     if strategy == "full":
         for issues in (True, False):
             if issues and not repository.issues_enabled:
@@ -69,6 +80,7 @@ def discover_parents(
     endpoint = "https://api.github.com/repos/{}/{}/issues".format(
         *(quote(part, safe="") for part in parts)
     )
+    since = start - timedelta(seconds=1)
     url = (
         endpoint
         + "?"

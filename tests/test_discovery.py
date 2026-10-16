@@ -1,6 +1,7 @@
 """Offline discovery selection, hydration, and shared-source report comparisons."""
 
 from copy import deepcopy
+from dataclasses import replace
 from datetime import datetime, timezone
 from urllib.parse import parse_qs, urlsplit
 
@@ -8,6 +9,7 @@ import pytest
 
 import repo_history as api
 from repo_history import collection
+from repo_history.discovery import BOUNDED_DISCOVERY_LIMITATION
 from repo_history.queries import parent_hydration_query
 
 from .helpers import Response, Session, empty_commits, errors, repository
@@ -312,6 +314,9 @@ def test_earliest_month_selects_full_before_discovery(session, caplog):
     session.responses = [repository(), connection("pullRequests")]
     report = api.collect_month("o", "r", 1, 1, token="test", discovery="bounded")
     assert report.metadata.month == "0001-01"
+    assert report.metadata.parent_discovery == "full"
+    assert BOUNDED_DISCOVERY_LIMITATION not in report.metadata.coverage_limitations
+    assert api.report_from_json(api.report_to_json(report)) == report
     assert "overlap underflow" in caplog.text
     assert "strategy=full" in caplog.text
     assert all("json" in kwargs for _, kwargs in session.calls)
@@ -518,7 +523,30 @@ def test_shared_histories_produce_identical_complete_reports(
         "bounded",
         month=month,
     )
-    assert full == bounded_report
+    assert full.metadata.parent_discovery == "full"
+    assert bounded_report.metadata.parent_discovery == "bounded"
+    assert BOUNDED_DISCOVERY_LIMITATION not in full.metadata.coverage_limitations
+    assert (
+        bounded_report.metadata.coverage_limitations.count(BOUNDED_DISCOVERY_LIMITATION)
+        == 1
+    )
+    assert (
+        tuple(
+            item
+            for item in bounded_report.metadata.coverage_limitations
+            if item != BOUNDED_DISCOVERY_LIMITATION
+        )
+        == full.metadata.coverage_limitations
+    )
+    # Only strategy provenance and its associated limitation differ.
+    assert full == replace(
+        bounded_report,
+        metadata=replace(
+            bounded_report.metadata,
+            parent_discovery="full",
+            coverage_limitations=full.metadata.coverage_limitations,
+        ),
+    )
     assert bounded_report.metadata.ongoing == (month == 4)
     if month == 2:
         kinds = {a.type for a in full.activities}
@@ -546,7 +574,7 @@ def test_counterexample_explicitly_demonstrates_unproven_completeness(monkeypatc
     assert "pr_review:V_one" in missing
     assert "pr_inline_review_comment:C_inline" in missing
     assert all(a.subject.node_id != "P_old" for a in optimized.activities)
-    assert full != optimized
+    assert full.activities != optimized.activities
 
 
 def test_excluded_malformed_history_changes_validation_scope(monkeypatch):
@@ -624,6 +652,7 @@ def test_explicit_bounded_matches_default_request_sequence(session):
     history = [repository(), Response([])]
     session.responses = deepcopy(history)
     default = api.collect_month("o", "r", 2024, 2, token="test")
+    assert default.metadata.parent_discovery == "bounded"
     calls = deepcopy(session.calls)
     session.calls.clear()
     session.responses = deepcopy(history)

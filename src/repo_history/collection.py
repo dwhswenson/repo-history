@@ -5,7 +5,7 @@ import re
 from dataclasses import replace
 from datetime import datetime, timezone
 
-from .discovery import discover_parents
+from .discovery import BOUNDED_DISCOVERY_LIMITATION, discover_parents, select_strategy
 from .errors import GraphQLError
 from .models import (
     Activity,
@@ -553,11 +553,14 @@ def _collect_month(
 
     repository = lookup_repository(client, owner, repo)
     records = _Records()
+    discovery = select_strategy(start, discovery)
     for issues, parent, operation in discover_parents(
         client, repository, start, end, strategy=discovery
     ):
         _collect_parent(client, parent, operation, start, end, records, issues=issues)
     limitations = COVERAGE_LIMITATIONS
+    if discovery == "bounded":
+        limitations += (BOUNDED_DISCOVERY_LIMITATION,)
     strategy = collect_commits(client, repository, start, end, records)
     if strategy == "bounded":
         limitations += (BOUNDED_LIMITATION,)
@@ -577,5 +580,6 @@ def _collect_month(
         default_branch_head=repository.default_branch_head,
         coverage_limitations=limitations,
         commit_history=strategy,
+        parent_discovery=discovery,
     )
     return build_report(metadata, records.actors.values(), records.activities.values())
