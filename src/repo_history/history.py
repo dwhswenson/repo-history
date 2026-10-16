@@ -6,8 +6,8 @@ from datetime import datetime, timezone
 from time import perf_counter
 
 from .collection import COVERAGE_LIMITATIONS, _collect_parent, _month_bounds, _Records
-from .commits import collect_commits
-from .discovery import discover_parents
+from .commits import BOUNDED_LIMITATION, collect_commits
+from .discovery import BOUNDED_DISCOVERY_LIMITATION, discover_parents, select_strategy
 from .errors import GraphQLError, ReportWriteError
 from .models import CommitMetadata, MonthlyReport, ReportMetadata, RepositoryHistory
 from .reports import build_report
@@ -36,6 +36,28 @@ def collect_history(
 def _collect_history(
     owner, repo, *, token=None, expected_repository_id=None, started=None
 ):
+    history, _, _ = _collect_snapshot(
+        owner,
+        repo,
+        token=token,
+        expected_repository_id=expected_repository_id,
+        started=started,
+    )
+    return history
+
+
+def _collect_snapshot(
+    owner,
+    repo,
+    *,
+    token=None,
+    expected_repository_id=None,
+    started=None,
+    start=None,
+    end=None,
+    discovery="full",
+):
+    """Collect one interval (or full history) with actual strategy provenance."""
     if any(
         not isinstance(value, str) or not value.strip() or "/" in value
         for value in (owner, repo)
@@ -57,22 +79,33 @@ def _collect_history(
                     "missing repository creation timestamp",
                     operation="RepositoryLookup",
                 )
+            discovery = select_strategy(start, discovery)
+            embedded = discovery == "full"
             records = _Records()
             for issues, parent, operation in discover_parents(
-                client, repository, None, None, strategy="full", include_activity=True
+                client,
+                repository,
+                start,
+                end,
+                strategy=discovery,
+                include_activity=embedded,
             ):
                 _collect_parent(
                     client,
                     parent,
                     operation,
-                    None,
-                    None,
+                    start,
+                    end,
                     records,
                     issues=issues,
-                    initial_pages=True,
+                    initial_pages=embedded,
                 )
-            collect_commits(client, repository, None, None, records)
+            commit_strategy = collect_commits(client, repository, start, end, records)
             limitations = COVERAGE_LIMITATIONS
+            if discovery == "bounded":
+                limitations += (BOUNDED_DISCOVERY_LIMITATION,)
+            if commit_strategy == "bounded":
+                limitations += (BOUNDED_LIMITATION,)
             if not repository.issues_enabled:
                 limitations += (
                     "Issues are disabled; the issue connection was not collected.",
@@ -96,7 +129,7 @@ def _collect_history(
                 ),
             )
             completed = True
-            return result
+            return result, discovery, commit_strategy
         finally:
             rest, graphql = client._api_usage["rest"], client._api_usage["graphql"]
             LOG.info(
@@ -125,6 +158,13 @@ def history_to_months(
     default end is the UTC month at collection start. Future output months are
     rejected relative to that snapshot. Empty months are included.
     """
+    return _history_to_months(history, start, end)
+
+
+def _history_to_months(
+    history, start=None, end=None, *, parent_discovery="full", commit_history="full"
+):
+    """Shared projection with explicit collection provenance."""
     # Imported lazily because backfill integrates this module's collector.
     from .backfill import _parse_month, _validate_range
 
@@ -168,8 +208,8 @@ def history_to_months(
             default_branch=history.default_branch,
             default_branch_head=history.default_branch_head,
             coverage_limitations=history.coverage_limitations,
-            parent_discovery="full",
-            commit_history="full",
+            parent_discovery=parent_discovery,
+            commit_history=commit_history,
         )
         reports.append(
             build_report(

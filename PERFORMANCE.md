@@ -1,3 +1,19 @@
+# CLI workflow performance
+
+`backfill` defaults to a complete history traversal followed by offline monthly
+grouping. `update` defaults to one traversal of its selected interval: one
+repository lookup, bounded parent discovery, each retained parent's nested
+histories, and buffered captured-head commit history. Grouping happens offline
+and all selected reports validate before writing. Actual strategies and existing
+completeness limitations are recorded per report. `--discovery full` selects full
+parent discovery while retaining buffered commit traversal.
+
+Without an explicit start, update recollects the latest monthly report filename
+and every subsequent month through its end. No reports triggers history-first
+backfill; `--mode monthly` instead uses monthly backfill. Independent monthly
+runs remain available through explicit mode flags. `summarize` is offline and
+must be invoked explicitly after reports change.
+
 # Collector performance
 
 For single-month collection and monthly-mode backfill, bounded discovery is the

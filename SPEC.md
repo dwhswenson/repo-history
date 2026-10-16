@@ -2,7 +2,7 @@
 
 ## Goal and interfaces
 
-Build a Python library and CLI that collects repository history once for initial backfills, groups activities into monthly reports offline, and writes `YYYY-MM.json`. Retain independent single-month collection.
+Build a Python library and CLI that collects repository history once for initial backfills, groups activities into monthly reports offline, and writes `YYYY-MM.json`. Expose backfill, update, and summarize CLI commands; retain independent monthly collection behind flags and through Python APIs.
 
 Reports support casual activity reporting, year-over-year growth analysis, and annual reports to funders. Counts should be useful and consistent, but exhaustive historical reconstruction is not required. Document known coverage limitations and favor practical collection costs where the tradeoff is explicit. Exact month assignment, attribution rules, deduplication, and internally consistent summaries still apply to collected events.
 
@@ -15,10 +15,31 @@ backfill(owner, repo, start=None, end=None, *, output_directory, token=None,
 ```
 
 ```text
-repo-history OWNER/REPO --month YYYY-MM --output-directory PATH
+repo-history backfill OWNER/REPO [--start YYYY-MM] [--end YYYY-MM] --output-directory PATH
+repo-history update OWNER/REPO [--start YYYY-MM] [--end YYYY-MM] --output-directory PATH
+repo-history summarize --input-directory PATH [--output PATH]
 ```
 
-Omitting `--month` selects the current UTC month. The `backfill` command defaults to `--mode history`: one complete history traversal followed by offline grouping. Optional starting and ending months are inclusive and limit output only. Omitted start uses the earlier of repository creation and the earliest observed activity, including imported commits. Omitted end uses the collection-start UTC month. Include empty months. `--mode monthly` preserves independent monthly collection and the creation-month default start. `discovery`/`--discovery` applies only to monthly mode and defaults there to bounded; reject explicit discovery in history mode before network requests.
+The `backfill` command defaults to `--mode history`: one complete history traversal followed by offline grouping. Optional starting and ending months are inclusive and limit output only. Omitted start uses the earlier of repository creation and the earliest observed activity, including imported commits. Omitted end uses the collection-start UTC month. Include empty months. `--mode monthly` preserves independent monthly collection and the creation-month default start. `discovery`/`--discovery` applies only to monthly mode and defaults there to bounded; reject explicit discovery in history mode before network requests.
+
+Update defaults to `--mode range`: one interval traversal using experimental
+bounded parent discovery and buffered commit history, followed by offline monthly
+grouping. Optional `--discovery full|bounded` selects parent discovery, independently
+of commit traversal. `--mode monthly` retains independent monthly runs. With no
+explicit start, validate existing destination reports and use the latest direct-child
+`YYYY-MM.json` filename as the inclusive start, recollecting that month. Ignore
+unrelated files and directories. Do not repair earlier gaps. Missing directories
+or no monthly reports trigger history-first backfill (monthly backfill when
+`--mode monthly`), with automatic start; history-first fallback always uses full
+history. Omitted end uses invocation's UTC month; reject future/reversed ranges
+before requests. Verify repository identity before range traversal and validate
+all projected reports before replacing any file. Record actual discovery/commit
+strategies and coverage limitations in each report.
+
+Summarize replaces the former manifest command and generates the existing
+visualizer manifest offline. Collection does not regenerate it. The implicit
+single-month CLI and manifest command are removed; use update with equal endpoints
+for one month. Existing public Python APIs and JSON schemas remain compatible.
 
 Single-month collection uses buffered commit history in both parent discovery modes. History-first collection always uses unfiltered commit history and full GraphQL parent discovery.
 
@@ -117,6 +138,6 @@ Persistent caching, incremental synchronization, and scheduling are deferred. Th
 
 5. **Monthly commit collection.** Collect captured default-branch history with buffered date bounds in either parent-discovery mode, attributing commits to authors/co-authors. Record the strategy and coverage limitations. Test merge commits, unresolved identities, duplicate authors, exact month filtering, small timestamp inversions within the buffer, documented omissions beyond the buffer, unbounded fallback across non-monotonic dates, unsupported filter dates, and empty repositories.
 
-6. **Reports and CLI.** Implement monthly summaries, schema validation, atomic writing, the single-month CLI default, and explicit backfill. Test UTC boundaries, leap years, empty months, ongoing months, isolated monthly runs, reruns that leave other files untouched, and backfill failures.
+6. **Reports and CLI.** Implement monthly summaries, schema validation, atomic writing, explicit backfill/update commands, and offline summarization. Test UTC boundaries, leap years, empty months, ongoing months, isolated monthly runs, reruns that leave other files untouched, and backfill failures.
 
 7. **End-to-end validation and documentation.** Verify packaged schema availability and documented library/CLI usage. Use a multi-month mocked history to prove independent monthly runs match backfill results and provide enough information to derive cumulative actor statistics. Add an opt-in live smoke check.

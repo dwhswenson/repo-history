@@ -39,29 +39,53 @@ Use `py313`, `py314`, `py315`, `node24`, or `node26` to test another runtime.
 Set `GH_TOKEN` or `GITHUB_TOKEN` before collecting. After installation, use:
 
 ```text
-repo-history example/project --month 2024-02 --output-directory reports
-repo-history example/project --output-directory reports
-repo-history backfill example/project --start 2024-01 --end 2024-12 --output-directory reports
 repo-history backfill example/project --output-directory reports
+repo-history backfill example/project --start 2024-01 --end 2024-12 --output-directory reports
+repo-history update example/project --output-directory reports
+repo-history update example/project --start 2024-02 --end 2024-06 --output-directory reports
+repo-history summarize --input-directory reports
 ```
 
-The output directory is required and is created if missing. Omitting `--month`
-selects the current **UTC** month at invocation. Future months are rejected.
-Backfill includes both endpoints and defaults to collecting all history once,
+The output directory is required and is created if missing. All ranges include
+both endpoints; omitted `--end` selects the current **UTC** month at invocation.
+Future months are rejected. Backfill defaults to collecting all history once,
 then grouping it into monthly reports offline. Omit `--start` to begin at the
 earlier of repository creation and the earliest observed activity, including
-imported commits; omit `--end` to finish at the current UTC month. Empty months
-are included. Explicit ranges limit output, not the history traversal.
+imported commits. Empty months are included. Explicit backfill ranges limit
+output, not the history traversal.
 
-Use `backfill --mode monthly` for independent monthly runs. In that mode the
-default start is repository creation, and `--discovery full|bounded` selects
-parent discovery (default: bounded, experimental). A single-month command also
-accepts `--discovery`; history-mode backfills reject it with guidance to select
-monthly mode. For example:
+Update defaults to one traversal of the requested interval using experimental
+bounded parent discovery and buffered commit history. Without `--start`, it
+selects the latest direct-child `YYYY-MM.json` report filename and **recollects
+that month** through the end month. It replaces every selected report, leaves
+earlier files untouched, and does not repair earlier gaps. An end before the
+selected start is an argument error. Existing reports are validated before
+filename inference or network requests; unrelated files and subdirectories are
+ignored. Invalid reports fail rather than triggering a backfill.
+
+With no explicit start and no monthly reports (including a missing directory),
+update falls back to history-first backfill with its automatic start. This
+fallback uses full history regardless of `--discovery`. An explicit start uses
+range collection even when the directory has no reports.
+
+Use `backfill --mode monthly` or `update --mode monthly` for independent monthly
+runs. Monthly-mode backfill starts at repository creation unless `--start` is
+supplied; update retains filename inference and falls back to monthly backfill
+when no reports exist. `--discovery full|bounded` controls parent discovery for
+update and monthly backfill (default: bounded, experimental); history-mode
+backfill rejects it. Full parent discovery still uses buffered commit traversal
+for updates. For example:
 
 ```text
+repo-history update example/project --start 2024-02 --end 2024-02 --discovery full --output-directory reports
 repo-history backfill example/project --mode monthly --discovery full --start 2024-01 --end 2024-12 --output-directory reports
 ```
+
+The CLI requires one of `backfill`, `update`, or `summarize`. The former implicit
+single-month command and `manifest` command have been removed. For one month,
+use update with equal `--start` and `--end` values. Summarization remains an
+explicit offline step after collection.
+
 `python -m repo_history` supports the same commands.
 With Pixi, prefix commands with `pixi run`, for example
 `pixi run repo-history --help`.
@@ -109,10 +133,11 @@ Before writing, every direct child named `YYYY-MM.json` must be a valid report,
 match its filename's month, and share that repository identity. Repository renames
 are allowed. Damaged files are rejected even when being replaced; move or repair
 them before retrying. Unrelated filenames and nested directories are ignored.
-Backfill and the CLI check existing files before making network requests; repository
-identity is compared immediately after repository lookup in history mode, before
-traversing parents or commits. Monthly mode checks each returned report. A
-backfill scans the destination once; standalone writes still scan on every call.
+Backfill and update check existing files before making network requests; repository
+identity is compared immediately after repository lookup in history and range
+modes, before traversing parents or commits. Monthly mode checks each returned
+report. History backfill and range updates scan destination reports once;
+standalone writes still scan on every call.
 
 Writing validates the report, writes and validates a temporary UTF-8 file in the
 destination directory, and atomically replaces the target. Failure before
@@ -534,11 +559,11 @@ MIT. See [LICENSE](LICENSE).
 After collecting monthly reports, generate a self-contained summary manifest offline:
 
 ```sh
-repo-history manifest --input-directory reports
-repo-history manifest --input-directory reports --output public/reports/manifest.json
+repo-history summarize --input-directory reports
+repo-history summarize --input-directory reports --output public/reports/manifest.json
 ```
 
-Publish the resulting `manifest.json` and the `repo-history-viz` bundle. The browser loads only the manifest. It contains monthly summaries, stable actor keys with classifications, and coverage metadata; full event records and actor profile fields remain in the monthly files. The generator validates every source report and atomically replaces the manifest. Rebuild explicitly after adding, replacing, or deleting reports; collection and backfill remain independent. Do not modify source reports concurrently with generation.
+Publish the resulting `manifest.json` and the `repo-history-viz` bundle. The browser loads only the manifest. It contains monthly summaries, stable actor keys with classifications, and coverage metadata; full event records and actor profile fields remain in the monthly files. The generator validates every source report and atomically replaces the manifest. Rebuild explicitly after adding, replacing, or deleting reports; backfill and update remain independent. Do not modify source reports concurrently with generation.
 
 The Python APIs are `build_manifest(reports) -> dict` and `write_manifest(report_directory, *, output_path=None) -> Path`. The packaged contract is `schemas/viz-manifest-v1.json`, independently versioned from monthly reports. The generator rejects empty directories, wrong month filenames, mixed repositories, and conflicting classifications for participating actors. Only immediate monthly report files are read; unrelated files and subdirectories are ignored.
 

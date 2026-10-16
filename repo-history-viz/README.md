@@ -18,14 +18,14 @@ Build from this repository with `npm ci && npm run build` inside `repo-history-v
 Generate a manifest from validated monthly reports, then publish only the manifest and visualizer bundle:
 
 ```sh
-repo-history manifest --input-directory reports
+repo-history summarize --input-directory reports
 # Optional destination:
-repo-history manifest --input-directory reports --output public/reports/manifest.json
+repo-history summarize --input-directory reports --output public/reports/manifest.json
 ```
 
 The manifest contains a repository identity, one shared actor-classification lookup, and monthly summaries plus coverage metadata. It omits individual events and actor profile fields. Hosted loading makes one credential-free HTTP(S) request; cross-origin manifests require CORS. Relative manifest URLs resolve against the host document's base URL. Local file selection reads one manifest in browser memory without uploading it.
 
-Regenerate the manifest explicitly after adding, replacing, or deleting monthly reports. Collection and backfill do not update it automatically. Source reports must remain unchanged during generation. The manifest is atomically replaced only after every source report and the completed manifest validate.
+Regenerate the manifest explicitly after adding, replacing, or deleting monthly reports. Backfill and update do not regenerate it automatically. Source reports must remain unchanged during generation. The manifest is atomically replaced only after every source report and the completed manifest validate.
 
 See `examples/embed.html` for a complete host page.
 

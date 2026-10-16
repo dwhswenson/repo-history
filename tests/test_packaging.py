@@ -92,7 +92,12 @@ for text in json.load(sys.stdin):
         [str(environment / "bin" / "repo-history")],
         [str(python), "-I", "-m", "repo_history"],
     ):
-        for arguments in (["--help"], ["backfill", "--help"]):
+        for arguments in (
+            ["--help"],
+            ["backfill", "--help"],
+            ["update", "--help"],
+            ["summarize", "--help"],
+        ):
             result = subprocess.run(
                 [*command, *arguments],
                 cwd=tmp_path,
@@ -100,5 +105,13 @@ for text in json.load(sys.stdin):
                 text=True,
                 check=True,
             )
-            assert "--output-directory" in result.stdout
-            assert "--discovery" in result.stdout
+            if arguments[0] in ("backfill", "update"):
+                assert "--output-directory" in result.stdout
+                assert "--discovery" in result.stdout
+            elif arguments[0] == "summarize":
+                assert "--input-directory" in result.stdout
+            else:
+                assert all(
+                    name in result.stdout
+                    for name in ("backfill", "update", "summarize")
+                )

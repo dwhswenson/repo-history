@@ -84,7 +84,7 @@ export function parseManifest(source: ManifestSource): Manifest {
     ("files" in value || "activities" in value)
   ) {
     return fail(
-      "Load a summary manifest generated with repo-history manifest --input-directory REPORTS.",
+      "Load a summary manifest generated with repo-history summarize --input-directory REPORTS.",
     );
   }
   if (!validate(value)) {

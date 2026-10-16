@@ -1,4 +1,4 @@
-"""Command-line collection of monthly GitHub reports."""
+"""Command-line backfill, incremental updates, and visualization summaries."""
 
 import argparse
 import logging
@@ -6,17 +6,10 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .backfill import (
-    _parse_month,
-    _run_backfill,
-    _validate_optional_range,
-    _validate_range,
-    _validate_request,
-)
-from .collection import collect_month
+from .backfill import _run_backfill, _validate_optional_range, _validate_request
 from .errors import GitHubAPIError, RateLimitError
 from .manifest import write_manifest
-from .writing import _check_directory, write_report
+from .update import _prepare_update, _run_update
 
 LOG = logging.getLogger(__name__)
 
@@ -32,46 +25,7 @@ def _repository(value: str) -> tuple[str, str]:
     return tuple(parts)
 
 
-def _parser(backfilling: bool) -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="repo-history" + (" backfill" if backfilling else ""),
-        description=(
-            "Collect an inclusive range of monthly reports."
-            if backfilling
-            else "Collect one UTC month. Use 'backfill --help' for inclusive ranges."
-        ),
-    )
-    parser.add_argument("repository", type=_repository, metavar="OWNER/REPO")
-    if backfilling:
-        parser.add_argument(
-            "--start",
-            metavar="YYYY-MM",
-            help="default: earliest history (creation month in monthly mode)",
-        )
-        parser.add_argument(
-            "--end", metavar="YYYY-MM", help="default: current UTC month"
-        )
-        parser.add_argument(
-            "--mode",
-            choices=("history", "monthly"),
-            default="history",
-            help="collect history once or collect each month independently (default: history)",
-        )
-    else:
-        parser.add_argument(
-            "--month", metavar="YYYY-MM", help="default: current UTC month"
-        )
-    parser.add_argument("--output-directory", required=True, type=Path)
-    parser.add_argument(
-        "--discovery",
-        choices=("full", "bounded"),
-        default=None if backfilling else "bounded",
-        help=(
-            "monthly mode only; default there: bounded (experimental)"
-            if backfilling
-            else "parent discovery strategy; bounded is experimental (default: bounded)"
-        ),
-    )
+def _verbosity(parser):
     verbosity = parser.add_mutually_exclusive_group()
     verbosity.add_argument(
         "--quiet", action="store_true", help="errors only; suppress saved paths"
@@ -79,50 +33,85 @@ def _parser(backfilling: bool) -> argparse.ArgumentParser:
     verbosity.add_argument(
         "--verbose", action="store_true", help="include debug diagnostics"
     )
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="repo-history",
+        description="Collect repository history and summarize reports.",
+    )
+    commands = parser.add_subparsers(dest="command", required=True)
+    for name in ("backfill", "update"):
+        backfilling = name == "backfill"
+        command = commands.add_parser(
+            name,
+            help="Backfill old history." if backfilling else "Refresh recent months.",
+            description=(
+                "Collect history and group monthly reports."
+                if backfilling
+                else "Refresh an inclusive range; infer start from the latest report, "
+                "or backfill if none exist."
+            ),
+        )
+        command.add_argument("repository", type=_repository, metavar="OWNER/REPO")
+        command.add_argument(
+            "--start",
+            metavar="YYYY-MM",
+            help=(
+                "default: earliest history (creation month in monthly mode)"
+                if backfilling
+                else "default: latest report month, recollected; backfill if none exist"
+            ),
+        )
+        command.add_argument(
+            "--end", metavar="YYYY-MM", help="default: current UTC month"
+        )
+        command.add_argument(
+            "--mode",
+            choices=("history", "monthly") if backfilling else ("range", "monthly"),
+            default="history" if backfilling else "range",
+            help=(
+                "default: history (one full traversal)"
+                if backfilling
+                else "default: range (one interval traversal); empty destination uses full backfill"
+            ),
+        )
+        command.add_argument("--output-directory", required=True, type=Path)
+        command.add_argument(
+            "--discovery",
+            choices=("full", "bounded"),
+            default=None if backfilling else "bounded",
+            help=(
+                "monthly mode only; default: bounded (experimental)"
+                if backfilling
+                else "default: bounded (experimental); full-history fallback always uses full"
+            ),
+        )
+        _verbosity(command)
+    summary = commands.add_parser(
+        "summarize",
+        help="Generate the visualizer manifest offline.",
+        description="Build a self-contained visualization manifest offline.",
+    )
+    summary.add_argument("--input-directory", required=True, type=Path)
+    summary.add_argument(
+        "--output", type=Path, help="default: INPUT_DIRECTORY/manifest.json"
+    )
+    _verbosity(summary)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    argv = list(sys.argv[1:] if argv is None else argv)
-    if argv and argv[0] == "manifest":
-        parser = argparse.ArgumentParser(
-            prog="repo-history manifest",
-            description="Build a self-contained visualization manifest offline.",
-        )
-        parser.add_argument("--input-directory", required=True, type=Path)
-        parser.add_argument("--output", type=Path)
-        verbosity = parser.add_mutually_exclusive_group()
-        verbosity.add_argument("--quiet", action="store_true")
-        verbosity.add_argument("--verbose", action="store_true")
-        args = parser.parse_args(argv[1:])
-        try:
-            if args.verbose:
-                print(
-                    f"DEBUG: Validating monthly reports in {args.input_directory}",
-                    file=sys.stderr,
-                )
-            path = write_manifest(args.input_directory, output_path=args.output)
-            if not args.quiet:
-                print(path, flush=True)
-            return 0
-        except (ValueError, OSError) as exc:
-            print(f"ERROR: {exc}", file=sys.stderr)
-            return 1
-    backfilling = bool(argv and argv[0] == "backfill")
-    parser = _parser(backfilling)
-    args = parser.parse_args(argv[1:] if backfilling else argv)
+    parser = _parser()
+    args = parser.parse_args(argv)
     now = _utc_now()
-    try:
-        if backfilling:
-            _validate_request(*args.repository, args.discovery, args.mode)
-            _validate_optional_range(args.start, args.end, now)
-        else:
-            if args.month is None:
-                args.month = f"{now.year:04d}-{now.month:02d}"
-            _validate_range(args.month, args.month, now)
-            year, month = _parse_month(args.month)
-    except ValueError as exc:
-        parser.error(str(exc))
+    if args.command != "summarize":
+        try:
+            if args.command == "backfill":
+                _validate_request(*args.repository, args.discovery, args.mode)
+            args.end = _validate_optional_range(args.start, args.end, now)
+        except ValueError as exc:
+            parser.error(str(exc))
 
     level = (
         logging.ERROR if args.quiet else logging.DEBUG if args.verbose else logging.INFO
@@ -140,11 +129,12 @@ def main(argv: list[str] | None = None) -> int:
             print(path, flush=True)
 
     try:
-        owner, repo = args.repository
-        if backfilling:
+        if args.command == "summarize":
+            LOG.debug("Validating monthly reports in %s", args.input_directory)
+            saved(write_manifest(args.input_directory, output_path=args.output))
+        elif args.command == "backfill":
             _run_backfill(
-                owner,
-                repo,
+                *args.repository,
                 args.start,
                 args.end,
                 output_directory=args.output_directory,
@@ -154,10 +144,22 @@ def main(argv: list[str] | None = None) -> int:
                 now=now,
             )
         else:
-            _check_directory(args.output_directory)
-            LOG.info("Collecting %s/%s %s", owner, repo, args.month)
-            report = collect_month(owner, repo, year, month, discovery=args.discovery)
-            saved(write_report(report, args.output_directory))
+            start, repository_id = _prepare_update(args.output_directory, args.start)
+            try:
+                _validate_optional_range(start, args.end, now)
+            except ValueError as exc:
+                parser.error(str(exc))
+            _run_update(
+                *args.repository,
+                start,
+                args.end,
+                output_directory=args.output_directory,
+                discovery=args.discovery,
+                mode=args.mode,
+                on_written=saved,
+                now=now,
+                expected_repository_id=repository_id,
+            )
         return 0
     except (GitHubAPIError, ValueError, OSError) as exc:
         message = str(exc)

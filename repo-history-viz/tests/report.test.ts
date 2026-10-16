@@ -23,8 +23,11 @@ describe("summary manifests", () => {
     "rejects unsupported input formats with manifest generation guidance",
     (value) => {
       expect(() =>
-        parseManifest({ name: "unsupported.json", text: JSON.stringify(value) }),
-      ).toThrow("repo-history manifest --input-directory REPORTS");
+        parseManifest({
+          name: "unsupported.json",
+          text: JSON.stringify(value),
+        }),
+      ).toThrow("repo-history summarize --input-directory REPORTS");
     },
   );
   it.each([

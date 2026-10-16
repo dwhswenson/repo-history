@@ -42,7 +42,6 @@ def collector(monkeypatch, empty):
             ),
         )
 
-    monkeypatch.setattr(cli, "collect_month", collect)
     monkeypatch.setattr(backfill_module, "collect_month", collect)
 
     def now():
@@ -57,8 +56,13 @@ def test_explicit_month_and_discovery(tmp_path, collector, capsys):
     assert (
         cli.main(
             [
+                "update",
+                "--mode",
+                "monthly",
                 "o/r",
-                "--month",
+                "--start",
+                "2024-02",
+                "--end",
                 "2024-02",
                 "--discovery",
                 "bounded",
@@ -68,7 +72,7 @@ def test_explicit_month_and_discovery(tmp_path, collector, capsys):
         )
         == 0
     )
-    assert collector == [("o", "r", 2024, 2, {"discovery": "bounded"})]
+    assert collector == [("o", "r", 2024, 2, {"token": None, "discovery": "bounded"})]
     out, err = capsys.readouterr()
     assert out == str(tmp_path / "2024-02.json") + "\n"
     assert "Collecting o/r 2024-02" in err
@@ -77,7 +81,21 @@ def test_explicit_month_and_discovery(tmp_path, collector, capsys):
 
 
 def test_default_month_uses_invocation_utc(tmp_path, collector, capsys):
-    assert cli.main(["o/r", "--output-directory", str(tmp_path)]) == 0
+    assert (
+        cli.main(
+            [
+                "update",
+                "--mode",
+                "monthly",
+                "o/r",
+                "--start",
+                "2024-03",
+                "--output-directory",
+                str(tmp_path),
+            ]
+        )
+        == 0
+    )
     assert collector[0][2:4] == (2024, 3)
     assert "2024-03.json" in capsys.readouterr().out
 
@@ -86,7 +104,19 @@ def test_default_month_uses_invocation_utc(tmp_path, collector, capsys):
 def test_verbosity(tmp_path, collector, capsys, flag):
     assert (
         cli.main(
-            ["o/r", "--month", "2024-02", "--output-directory", str(tmp_path), flag]
+            [
+                "update",
+                "--mode",
+                "monthly",
+                "o/r",
+                "--start",
+                "2024-02",
+                "--end",
+                "2024-02",
+                "--output-directory",
+                str(tmp_path),
+                flag,
+            ]
         )
         == 0
     )
@@ -107,11 +137,29 @@ def test_verbosity(tmp_path, collector, capsys, flag):
         ["/r"],
         ["o/"],
         [" o/r"],
-        ["o/r", "--month", "2024-2"],
-        ["o/r", "--month", "2024-13"],
-        ["o/r", "--month", "2024-04"],
-        ["o/r", "--discovery", "bad"],
-        ["o/r", "--quiet", "--verbose"],
+        ["update", "--mode", "monthly", "o/r", "--start", "2024-2", "--end", "2024-2"],
+        [
+            "update",
+            "--mode",
+            "monthly",
+            "o/r",
+            "--start",
+            "2024-13",
+            "--end",
+            "2024-13",
+        ],
+        [
+            "update",
+            "--mode",
+            "monthly",
+            "o/r",
+            "--start",
+            "2024-04",
+            "--end",
+            "2024-04",
+        ],
+        ["update", "o/r", "--discovery", "bad"],
+        ["update", "o/r", "--quiet", "--verbose"],
         [
             "backfill",
             "--mode",
@@ -133,7 +181,7 @@ def test_invalid_arguments_exit_two_before_network(tmp_path, collector, argument
 
 def test_output_directory_required(collector):
     with pytest.raises(SystemExit) as exc:
-        cli.main(["o/r"])
+        cli.main(["update", "o/r"])
     assert exc.value.code == 2
     assert not collector
 
@@ -155,12 +203,17 @@ def test_expected_errors_exit_one(tmp_path, collector, monkeypatch, capsys, erro
     def fail(*args, **kwargs):
         raise error
 
-    monkeypatch.setattr(cli, "collect_month", fail)
+    monkeypatch.setattr(backfill_module, "collect_month", fail)
     assert (
         cli.main(
             [
+                "update",
+                "--mode",
+                "monthly",
                 "o/r",
-                "--month",
+                "--start",
+                "2024-02",
+                "--end",
                 "2024-02",
                 "--output-directory",
                 str(tmp_path),
@@ -216,7 +269,20 @@ def test_backfill_prints_completed_month_before_failure(
 def test_bad_directory_prevents_collection(tmp_path, collector, capsys):
     (tmp_path / "2024-01.json").write_text("broken")
     assert (
-        cli.main(["o/r", "--month", "2024-02", "--output-directory", str(tmp_path)])
+        cli.main(
+            [
+                "update",
+                "--mode",
+                "monthly",
+                "o/r",
+                "--start",
+                "2024-02",
+                "--end",
+                "2024-02",
+                "--output-directory",
+                str(tmp_path),
+            ]
+        )
         == 1
     )
     assert not collector
@@ -227,7 +293,20 @@ def test_logging_configuration_restored(tmp_path, collector):
     logger = logging.getLogger("repo_history")
     original = logger.level, logger.propagate, logger.handlers[:]
     assert (
-        cli.main(["o/r", "--month", "2024-02", "--output-directory", str(tmp_path)])
+        cli.main(
+            [
+                "update",
+                "--mode",
+                "monthly",
+                "o/r",
+                "--start",
+                "2024-02",
+                "--end",
+                "2024-02",
+                "--output-directory",
+                str(tmp_path),
+            ]
+        )
         == 0
     )
     assert (logger.level, logger.propagate, logger.handlers) == original
@@ -239,8 +318,13 @@ def test_real_collector_missing_authentication(tmp_path, monkeypatch, capsys):
     assert (
         cli.main(
             [
+                "update",
+                "--mode",
+                "monthly",
                 "o/r",
-                "--month",
+                "--start",
+                "2024-02",
+                "--end",
                 "2024-02",
                 "--output-directory",
                 str(tmp_path),
@@ -265,8 +349,19 @@ def test_real_collector_missing_authentication(tmp_path, monkeypatch, capsys):
 def test_default_utc_month_at_rollover(tmp_path, collector, monkeypatch, now, expected):
     times = iter([now])
     monkeypatch.setattr(cli, "_utc_now", lambda: next(times))
-    assert cli.main(["o/r", "--output-directory", str(tmp_path)]) == 0
-    assert collector[0][2:4] == expected
+    from repo_history import report_to_json
+
+    # Seed the preceding month so update recollects it and reaches invocation month.
+    report = backfill_module.collect_month("o", "r", 2024, 1)
+    (tmp_path / "2024-01.json").write_text(report_to_json(report))
+    collector.clear()
+    assert (
+        cli.main(
+            ["update", "--mode", "monthly", "o/r", "--output-directory", str(tmp_path)]
+        )
+        == 0
+    )
+    assert collector[-1][2:4] == expected
 
 
 @pytest.mark.parametrize(
@@ -305,8 +400,13 @@ def test_explicit_full_override(tmp_path, collector):
     assert (
         cli.main(
             [
+                "update",
+                "--mode",
+                "monthly",
                 "o/r",
-                "--month",
+                "--start",
+                "2024-02",
+                "--end",
                 "2024-02",
                 "--discovery",
                 "full",
@@ -317,3 +417,64 @@ def test_explicit_full_override(tmp_path, collector):
         == 0
     )
     assert collector[0][4]["discovery"] == "full"
+
+
+@pytest.mark.parametrize("command", ["backfill", "update"])
+@pytest.mark.parametrize("repository", ["owner", "o/r/extra", "/r", "o/", " o/r"])
+def test_bad_repository_in_subcommands(collector, command, repository, tmp_path):
+    with pytest.raises(SystemExit) as exc:
+        cli.main([command, repository, "--output-directory", str(tmp_path)])
+    assert exc.value.code == 2
+    assert not collector
+
+
+@pytest.mark.parametrize("command", [None, "backfill", "update", "summarize"])
+def test_command_help(command, capsys):
+    with pytest.raises(SystemExit) as exc:
+        cli.main(([command] if command else []) + ["--help"])
+    assert exc.value.code == 0
+    out = capsys.readouterr().out
+    if command is None:
+        assert all(name in out for name in ("backfill", "update", "summarize"))
+    elif command == "summarize":
+        assert "--input-directory" in out
+    else:
+        assert all(
+            flag in out for flag in ("--start", "--end", "--mode", "--discovery")
+        )
+
+
+@pytest.mark.parametrize(
+    "arguments", [["manifest"], ["o/r"], ["update", "o/r", "--month", "2024-02"]]
+)
+def test_removed_entrypoints(collector, arguments, tmp_path):
+    with pytest.raises(SystemExit) as exc:
+        cli.main([*arguments, "--output-directory", str(tmp_path)])
+    assert exc.value.code == 2
+    assert not collector
+
+
+@pytest.mark.parametrize("discovery", ["full", "bounded"])
+def test_update_monthly_fallback(tmp_path, collector, monkeypatch, discovery):
+    monkeypatch.setattr(
+        backfill_module, "_lookup_start", lambda *args: ("R_example", "2024-01")
+    )
+    assert (
+        cli.main(
+            [
+                "update",
+                "o/r",
+                "--mode",
+                "monthly",
+                "--end",
+                "2024-02",
+                "--discovery",
+                discovery,
+                "--output-directory",
+                str(tmp_path),
+            ]
+        )
+        == 0
+    )
+    assert [c[2:4] for c in collector] == [(2024, 1), (2024, 2)]
+    assert all(c[4]["discovery"] == discovery for c in collector)

@@ -175,7 +175,7 @@ def test_cli_offline_and_output(tmp_path, mixed, capsys, monkeypatch):
     (tmp_path / "2024-02.json").write_text(report_to_json(mixed))
     (tmp_path / "notes.json").write_text("ignored")
     (tmp_path / "2024-01.json").mkdir()
-    args = ["manifest", "--input-directory", str(tmp_path)]
+    args = ["summarize", "--input-directory", str(tmp_path)]
     assert main(args) == 0
     assert str(tmp_path / "manifest.json") in capsys.readouterr().out
     assert main([*args, "--quiet"]) == 0
