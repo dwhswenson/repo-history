@@ -48,13 +48,13 @@ repo-history summarize --input-directory reports
 
 The output directory is required and is created if missing. All ranges include
 both endpoints; omitted `--end` selects the current **UTC** month at invocation.
-Future months are rejected. Backfill defaults to collecting all history once,
+Future months are rejected. Backfill collects all history once,
 then grouping it into monthly reports offline. Omit `--start` to begin at the
 earlier of repository creation and the earliest observed activity, including
 imported commits. Empty months are included. Explicit backfill ranges limit
 output, not the history traversal.
 
-Update defaults to one traversal of the requested interval using experimental
+Update collects the requested interval once using experimental
 bounded parent discovery and buffered commit history. Without `--start`, it
 selects the latest direct-child `YYYY-MM.json` report filename and **recollects
 that month** through the end month. It replaces every selected report, leaves
@@ -65,21 +65,10 @@ ignored. Invalid reports fail rather than triggering a backfill.
 
 With no explicit start and no monthly reports (including a missing directory),
 update falls back to history-first backfill with its automatic start. This
-fallback uses full history regardless of `--discovery`. An explicit start uses
-range collection even when the directory has no reports.
-
-Use `backfill --mode monthly` or `update --mode monthly` for independent monthly
-runs. Monthly-mode backfill starts at repository creation unless `--start` is
-supplied; update retains filename inference and falls back to monthly backfill
-when no reports exist. `--discovery full|bounded` controls parent discovery for
-update and monthly backfill (default: bounded, experimental); history-mode
-backfill rejects it. Full parent discovery still uses buffered commit traversal
-for updates. For example:
-
-```text
-repo-history update example/project --start 2024-02 --end 2024-02 --discovery full --output-directory reports
-repo-history backfill example/project --mode monthly --discovery full --start 2024-01 --end 2024-12 --output-directory reports
-```
+fallback uses full history. An explicit start uses bounded range collection even
+when the directory has no reports. Update always collects its requested interval
+once, then groups activities into monthly files; it does not repeat collection
+independently for each month. Backfill always collects full history once.
 
 The CLI requires one of `backfill`, `update`, or `summarize`. The former implicit
 single-month command and `manifest` command have been removed. For one month,
@@ -114,17 +103,16 @@ paths = backfill(
     "2024-01",
     "2024-12",
     output_directory="reports",
-    # Default mode="history": one complete traversal.
+    # One complete history traversal, then offline grouping.
 )
 ```
 
 `backfill("example", "project", output_directory="reports")` uses the same
 automatic endpoints. `backfill` also accepts `token=None` and returns a
-chronological list of saved paths on success. History mode finishes collection
+chronological list of saved paths on success. Backfill finishes collection
 and validates all selected reports before writing: collection or grouping failure
 leaves existing files untouched. Writing failures preserve already saved months.
-Monthly mode collects and writes one month at a time, preserving completed months
-if a later collection fails. There is no automatic skipping, rollback, or resume.
+There is no automatic skipping, rollback, or resume.
 Reruns replace every requested month, including during backfill, without changing
 other months.
 
@@ -135,9 +123,8 @@ are allowed. Damaged files are rejected even when being replaced; move or repair
 them before retrying. Unrelated filenames and nested directories are ignored.
 Backfill and update check existing files before making network requests; repository
 identity is compared immediately after repository lookup in history and range
-modes, before traversing parents or commits. Monthly mode checks each returned
-report. History backfill and range updates scan destination reports once;
-standalone writes still scan on every call.
+collection, before traversing parents or commits. Backfill and updates scan
+destination reports once; standalone writes still scan on every call.
 
 Writing validates the report, writes and validates a temporary UTF-8 file in the
 destination directory, and atomically replaces the target. Failure before
@@ -181,7 +168,7 @@ History queries request 20 parents per page, 20 items per activity connection,
 and 10 review threads per parent, bounding nested response sizes. Lean activity
 continuation queries request up to 100 items; thread continuation queries request
 10 threads with embedded comment pages. Existing resource-limit retries can
-reduce the outer page size. Monthly mode retains its independent queries.
+reduce the outer page size. Standalone single-month Python collection retains its independent queries.
 
 Collection writes no files and raises without returning a partial snapshot if
 collection fails.

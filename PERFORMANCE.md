@@ -1,29 +1,27 @@
 # CLI workflow performance
 
-`backfill` defaults to a complete history traversal followed by offline monthly
-grouping. `update` defaults to one traversal of its selected interval: one
+`backfill` always uses a complete history traversal followed by offline monthly
+grouping. `update` always uses one traversal of its selected interval: one
 repository lookup, bounded parent discovery, each retained parent's nested
 histories, and buffered captured-head commit history. Grouping happens offline
 and all selected reports validate before writing. Actual strategies and existing
-completeness limitations are recorded per report. `--discovery full` selects full
-parent discovery while retaining buffered commit traversal.
+completeness limitations are recorded per report.
 
 Without an explicit start, update recollects the latest monthly report filename
 and every subsequent month through its end. No reports triggers history-first
-backfill; `--mode monthly` instead uses monthly backfill. Independent monthly
-runs remain available through explicit mode flags. `summarize` is offline and
+backfill. There is no independent monthly CLI workflow. `summarize` is offline and
 must be invoked explicitly after reports change.
 
 # Collector performance
 
-For single-month collection and monthly-mode backfill, bounded discovery is the
+For single-month Python collection and CLI updates, bounded discovery is the
 default by user preference. The validation work below remains outstanding; this
 default change does not establish completeness.
 Full traversal remains available through `discovery="full"`.
 
 ## History-first backfill
 
-Backfill now defaults to collecting a `RepositoryHistory` snapshot once, followed
+Backfill collects a `RepositoryHistory` snapshot once, followed
 by `history_to_months` offline projection. Parent connections and each nested
 connection are exhausted once rather than revisited per month. Commit history is
 walked once from a captured default-branch SHA without `since`/`until`. A single
@@ -74,7 +72,8 @@ snapshot stays in memory; interruption requires a fresh traversal.
 
 ## Monthly collector optimization plan
 
-The remaining plan below concerns `collect_month` and `backfill(mode="monthly")`.
+The remaining plan below concerns bounded collection through `collect_month` and
+CLI updates.
 It is independent of history-first backfill and its full parent discovery.
 
 ## Objective and current behavior
@@ -84,7 +83,7 @@ attribution, or report semantics. This document proposes implementation and
 validation work; it does not establish that parent update timestamps are already
 safe to use as a completeness filter.
 
-In full monthly mode, `discovery.py::discover_parents` paginates every accessible
+For standalone Python collection with full discovery, `discovery.py::discover_parents` paginates every accessible
 issue and PR through unfiltered repository connections. For each parent,
 `collection.py` independently traverses lifecycle events, conversation comments,
 and, for PRs, reviews, review threads, and thread comments. Activities are retained

@@ -310,16 +310,13 @@ def test_monthly_equivalence_and_request_measurement(session, tmp_path, caplog):
     )
     session.calls.clear()
     timer = perf_counter()
-    paths = api.backfill(
-        "o",
-        "r",
-        "2024-01",
-        "2024-03",
-        mode="monthly",
-        discovery="full",
-        output_directory=tmp_path / "monthly",
-        token="test",
-    )
+    paths = [
+        api.write_report(
+            api.collect_month("o", "r", 2024, month, token="test", discovery="full"),
+            tmp_path / "monthly",
+        )
+        for month in (1, 2, 3)
+    ]
     monthly_seconds = perf_counter() - timer
     monthly = [api.report_from_json(p.read_text()) for p in paths]
     for actual, expected in zip(grouped, monthly, strict=True):
@@ -455,7 +452,7 @@ def test_invalid_later_report_does_not_write_earlier_month(session, tmp_path):
 
 @pytest.mark.parametrize(
     "kwargs",
-    [{"discovery": "full"}, {"mode": "bad"}, {"start": "bad"}, {"end": "2024-05"}],
+    [{"start": "bad"}, {"end": "2024-05"}],
 )
 def test_invalid_backfill_before_network(session, tmp_path, kwargs):
     with pytest.raises(ValueError):
@@ -500,7 +497,7 @@ def test_cli_history_default_and_discovery_error(
             ]
         )
     assert error.value.code == 2 and len(session.calls) == calls
-    assert "--mode monthly" in capsys.readouterr().err
+    assert "unrecognized arguments: --discovery full" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("created", [None, "bad", "2024-01-01T00:00:00", 123])

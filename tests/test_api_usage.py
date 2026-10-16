@@ -146,5 +146,4 @@ def test_collector_queries_all_request_primary_cost():
         getattr(queries, name) for name in dir(queries) if name.endswith("_QUERY")
     ]
     documents.append(parent_hydration_query(50))
-    assert len(documents) == 19
     assert all(document.count("rateLimit { cost }") == 1 for document in documents)

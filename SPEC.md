@@ -2,7 +2,7 @@
 
 ## Goal and interfaces
 
-Build a Python library and CLI that collects repository history once for initial backfills, groups activities into monthly reports offline, and writes `YYYY-MM.json`. Expose backfill, update, and summarize CLI commands; retain independent monthly collection behind flags and through Python APIs.
+Build a Python library and CLI that collects repository history once for initial backfills, groups activities into monthly reports offline, and writes `YYYY-MM.json`. Expose backfill, update, and summarize CLI commands; retain standalone single-month collection through the Python API.
 
 Reports support casual activity reporting, year-over-year growth analysis, and annual reports to funders. Counts should be useful and consistent, but exhaustive historical reconstruction is not required. Document known coverage limitations and favor practical collection costs where the tradeoff is explicit. Exact month assignment, attribution rules, deduplication, and internally consistent summaries still apply to collected events.
 
@@ -10,8 +10,7 @@ Reports support casual activity reporting, year-over-year growth analysis, and a
 collect_month(owner, repo, year, month, *, token=None, discovery="bounded") -> MonthlyReport
 collect_history(owner, repo, *, token=None) -> RepositoryHistory
 history_to_months(history, start=None, end=None) -> list[MonthlyReport]
-backfill(owner, repo, start=None, end=None, *, output_directory, token=None,
-         mode="history", discovery=None) -> list[Path]
+backfill(owner, repo, start=None, end=None, *, output_directory, token=None) -> list[Path]
 ```
 
 ```text
@@ -20,26 +19,28 @@ repo-history update OWNER/REPO [--start YYYY-MM] [--end YYYY-MM] --output-direct
 repo-history summarize --input-directory PATH [--output PATH]
 ```
 
-The `backfill` command defaults to `--mode history`: one complete history traversal followed by offline grouping. Optional starting and ending months are inclusive and limit output only. Omitted start uses the earlier of repository creation and the earliest observed activity, including imported commits. Omitted end uses the collection-start UTC month. Include empty months. `--mode monthly` preserves independent monthly collection and the creation-month default start. `discovery`/`--discovery` applies only to monthly mode and defaults there to bounded; reject explicit discovery in history mode before network requests.
+Backfill always performs one complete history traversal followed by offline
+monthly grouping. Optional start/end months are inclusive and limit output only.
+Omitted start uses the earlier of repository creation and the earliest observed
+activity, including imported commits. Omitted end uses the invocation's UTC month.
+Include empty months.
 
-Update defaults to `--mode range`: one interval traversal using experimental
-bounded parent discovery and buffered commit history, followed by offline monthly
-grouping. Optional `--discovery full|bounded` selects parent discovery, independently
-of commit traversal. `--mode monthly` retains independent monthly runs. With no
-explicit start, validate existing destination reports and use the latest direct-child
+Update always collects one interval using bounded parent discovery and buffered
+commit history, then groups activities into monthly reports offline. With no
+explicit start, validate destination reports and use the latest direct-child
 `YYYY-MM.json` filename as the inclusive start, recollecting that month. Ignore
-unrelated files and directories. Do not repair earlier gaps. Missing directories
-or no monthly reports trigger history-first backfill (monthly backfill when
-`--mode monthly`), with automatic start; history-first fallback always uses full
-history. Omitted end uses invocation's UTC month; reject future/reversed ranges
-before requests. Verify repository identity before range traversal and validate
-all projected reports before replacing any file. Record actual discovery/commit
-strategies and coverage limitations in each report.
+unrelated files and directories; do not repair earlier gaps. No monthly reports
+or a missing directory triggers full-history backfill with automatic start.
+Omitted end uses invocation's UTC month; reject future/reversed ranges before
+requests. Verify repository identity before traversal and validate all projected
+reports before replacing files. Record actual discovery/commit strategies and
+coverage limitations, including internal boundary fallbacks. Neither command
+accepts `--mode` or `--discovery`; Python backfill also removes these options.
 
 Summarize replaces the former manifest command and generates the existing
 visualizer manifest offline. Collection does not regenerate it. The implicit
 single-month CLI and manifest command are removed; use update with equal endpoints
-for one month. Existing public Python APIs and JSON schemas remain compatible.
+for one month. The standalone `collect_month` API and JSON schemas remain compatible.
 
 Single-month collection uses buffered commit history in both parent discovery modes. History-first collection always uses unfiltered commit history and full GraphQL parent discovery.
 
@@ -107,9 +108,9 @@ Supplement schema validation with checks that actor references resolve, event ID
 - Use request timeouts, bounded retries, rate-limit handling, and smaller pages for oversized queries. HTTP or GraphQL errors that prevent completion of the selected collection strategy fail the run; accepted coverage limitations do not excuse request failures or incomplete pagination.
 - Write to a temporary file, validate, then atomically replace the requested month. Leave other monthly files untouched. Refuse an output directory containing reports for a different repository node ID.
 - History-first backfill uses one client and repository lookup, checks destination repository identity before traversal, then collects every accessible parent/nested connection and unfiltered default-head commit history once. Normalize and deduplicate stable activities using the existing attribution and publication rules. Capture repository creation time in the lookup.
-- History-mode parent queries embed first lifecycle/comment pages and PR review/thread pages; threads embed first inline-comment pages. Use independent `pageInfo` and resume cursors for every overflowing connection, including comments on later thread pages. Bound nested fan-out with 20 parents, 20 activity items, and 10 threads per page; use lean continuation queries except for thread pages, which retain embedded comment pages. Monthly-mode queries remain unchanged.
+- History-mode parent queries embed first lifecycle/comment pages and PR review/thread pages; threads embed first inline-comment pages. Use independent `pageInfo` and resume cursors for every overflowing connection, including comments on later thread pages. Bound nested fan-out with 20 parents, 20 activity items, and 10 threads per page; use lean continuation queries except for thread pages, which retain embedded comment pages. Standalone single-month Python queries remain unchanged.
 - `RepositoryHistory` is a frozen in-memory snapshot containing repository identity/creation time, captured head, collection interval, limitations, actors, and activities. Offline grouping uses UTC occurrence months, includes all referenced actors (including contextual authors and committers), and builds validated reports with shared snapshot metadata and both strategies `full`. Future output months are rejected relative to collection start; future source timestamps can remain in the snapshot.
-- Validate the destination once per backfill and all selected history-mode reports before replacing any file. Collection/grouping failures leave existing files untouched; writing failures preserve completed months. Keep per-file atomic replacement. Monthly mode retains collect-then-write behavior for each month. Standalone writes retain full destination checks.
+- Validate the destination once per backfill and all selected history-mode reports before replacing any file. Collection/grouping failures leave existing files untouched; writing failures preserve completed months. Keep per-file atomic replacement. Standalone writes retain full destination checks.
 - Log collection duration, request attempts/retries, measured REST/GraphQL cost and unmeasured attempts, plus history grouping/writing time, including failures. Persistent storage, resume, batching, and concurrency remain deferred.
 - Sort activities by timestamp and stable ID, and actors by identity key. Identical source data produces identical content except collection metadata.
 

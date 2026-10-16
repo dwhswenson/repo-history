@@ -107,7 +107,8 @@ for text in json.load(sys.stdin):
             )
             if arguments[0] in ("backfill", "update"):
                 assert "--output-directory" in result.stdout
-                assert "--discovery" in result.stdout
+                assert "--discovery" not in result.stdout
+                assert "--mode" not in result.stdout
             elif arguments[0] == "summarize":
                 assert "--input-directory" in result.stdout
             else:

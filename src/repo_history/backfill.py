@@ -1,4 +1,4 @@
-"""History-first backfill, with optional independent monthly collection."""
+"""Collect full history once and write monthly reports."""
 
 import logging
 import os
@@ -8,11 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
 
-from .collection import _month_bounds, collect_month
-from .errors import GraphQLError, ReportWriteError, RepositoryUnavailableError
+from .collection import _month_bounds
 from .history import _collect_history, history_to_months
-from .queries import BACKFILL_REPOSITORY_QUERY
-from .transport import GraphQLClient
 from .writing import _check_directory, _write_report
 
 LOG = logging.getLogger(__name__)
@@ -30,22 +27,12 @@ def _parse_month(value: str) -> tuple[int, int]:
     return year, month
 
 
-def _validate_request(
-    owner: str, repo: str, discovery: str | None, mode="history"
-) -> None:
+def _validate_request(owner: str, repo: str) -> None:
     if any(
         not isinstance(value, str) or not value.strip() or "/" in value
         for value in (owner, repo)
     ):
         raise ValueError("owner and repo must be nonempty names without slashes")
-    if mode not in ("history", "monthly"):
-        raise ValueError("mode must be history or monthly")
-    if discovery not in (None, "full", "bounded"):
-        raise ValueError("discovery must be full or bounded")
-    if mode == "history" and discovery is not None:
-        raise ValueError(
-            "discovery applies only to monthly mode; select mode='monthly' (--mode monthly)"
-        )
 
 
 def _validate_range(start: str, end: str, now: datetime) -> tuple[int, int]:
@@ -64,39 +51,6 @@ def _validate_optional_range(start: str | None, end: str | None, now: datetime) 
     return end
 
 
-def _lookup_start(owner: str, repo: str, token: str | None) -> tuple[str, str]:
-    operation = "BackfillRepository"
-    with GraphQLClient(token) as client:
-        data = client.execute(
-            BACKFILL_REPOSITORY_QUERY,
-            {"owner": owner, "name": repo},
-            operation_name=operation,
-        )
-    if "repository" in data and data["repository"] is None:
-        raise RepositoryUnavailableError(
-            "repository unavailable to this credential", operation=operation
-        )
-    item = data.get("repository")
-    if (
-        not isinstance(item, dict)
-        or not isinstance(item.get("id"), str)
-        or not item["id"]
-    ):
-        raise GraphQLError(
-            "malformed backfill repository metadata", operation=operation
-        )
-    try:
-        created = datetime.fromisoformat(item["createdAt"])
-        if created.tzinfo is None:
-            raise ValueError("timezone required")
-        created = created.astimezone(timezone.utc)
-    except (KeyError, TypeError, ValueError, OverflowError) as exc:
-        raise GraphQLError(
-            "malformed repository creation timestamp", operation=operation
-        ) from exc
-    return item["id"], f"{created.year:04d}-{created.month:02d}"
-
-
 def _run_backfill(
     owner: str,
     repo: str,
@@ -105,74 +59,41 @@ def _run_backfill(
     *,
     output_directory: str | os.PathLike,
     token: str | None = None,
-    discovery: str | None = None,
-    mode: str = "history",
     on_written: Callable[[Path], None] | None = None,
     now: datetime | None = None,
 ) -> list[Path]:
-    _validate_request(owner, repo, discovery, mode)
+    _validate_request(owner, repo)
     now = _utc_now() if now is None else now
     end = _validate_optional_range(start, end, now)
     repository_id = _check_directory(Path(output_directory))
-    if mode == "history":
-        history = _collect_history(
-            owner, repo, token=token, expected_repository_id=repository_id, started=now
-        )
-        timer = perf_counter()
-        completed = False
-        paths = []
-        try:
-            reports = history_to_months(history, start, end)
-            # All selected reports have been validated before any replacement.
-            LOG.info(
-                "History grouped months=%s elapsed_seconds=%.3f",
-                len(reports),
-                perf_counter() - timer,
-            )
-            for report in reports:
-                path = _write_report(report, output_directory)
-                paths.append(path)
-                if on_written is not None:
-                    on_written(path)
-            completed = True
-            return paths
-        finally:
-            LOG.info(
-                "History grouping/writing status=%s saved_months=%s elapsed_seconds=%.3f",
-                "completed" if completed else "failed",
-                len(paths),
-                perf_counter() - timer,
-            )
-    discovery = "bounded" if discovery is None else discovery
-    if start is None:
-        observed, start = _lookup_start(owner, repo, token)
-        if repository_id is not None and repository_id != observed:
-            raise ReportWriteError(
-                f"{output_directory}: report belongs to a different repository"
-            )
-        repository_id = observed
-    year, month = _validate_range(start, end, now)
-    last = _parse_month(end)
-    LOG.info("Backfill range %s through %s", start, end)
+    history = _collect_history(
+        owner, repo, token=token, expected_repository_id=repository_id, started=now
+    )
+    timer = perf_counter()
+    completed = False
     paths = []
-    while (year, month) <= last:
-        LOG.info("Collecting %s/%s %04d-%02d", owner, repo, year, month)
-        report = collect_month(
-            owner, repo, year, month, token=token, discovery=discovery
+    try:
+        reports = history_to_months(history, start, end)
+        # All selected reports have been validated before any replacement.
+        LOG.info(
+            "History grouped months=%s elapsed_seconds=%.3f",
+            len(reports),
+            perf_counter() - timer,
         )
-        observed = report.metadata.repository_node_id
-        if repository_id is not None and observed != repository_id:
-            raise ReportWriteError(
-                f"{Path(output_directory) / (report.metadata.month + '.json')}: "
-                "report belongs to a different repository"
-            )
-        repository_id = observed
-        path = _write_report(report, output_directory)
-        paths.append(path)
-        if on_written is not None:
-            on_written(path)
-        year, month = year + (month == 12), month % 12 + 1
-    return paths
+        for report in reports:
+            path = _write_report(report, output_directory)
+            paths.append(path)
+            if on_written is not None:
+                on_written(path)
+        completed = True
+        return paths
+    finally:
+        LOG.info(
+            "History grouping/writing status=%s saved_months=%s elapsed_seconds=%.3f",
+            "completed" if completed else "failed",
+            len(paths),
+            perf_counter() - timer,
+        )
 
 
 def backfill(
@@ -183,18 +104,12 @@ def backfill(
     *,
     output_directory: str | os.PathLike,
     token: str | None = None,
-    discovery: str | None = None,
-    mode: str = "history",
 ) -> list[Path]:
     """Collect and replace each month in an inclusive YYYY-MM range.
 
-    History mode (default) collects once, then groups offline. Omitted start
+    Collect full history once, then group offline. Omitted start
     includes activity before repository creation; omitted end uses the current
     UTC month at invocation. All selected reports validate before writing.
-
-    Monthly mode preserves independent collection, defaults to bounded discovery,
-    and starts at repository creation unless an explicit start is supplied.
-    Explicit discovery is only accepted with mode="monthly".
 
     Return saved paths chronologically. The first error propagates; previously
     saved months remain usable. Existing monthly files must all be valid and
@@ -208,6 +123,4 @@ def backfill(
         end,
         output_directory=output_directory,
         token=token,
-        discovery=discovery,
-        mode=mode,
     )

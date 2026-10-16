@@ -128,13 +128,6 @@ query RepositoryLookup($owner: String!, $name: String!) {
 """
 )
 
-BACKFILL_REPOSITORY_QUERY = """
-query BackfillRepository($owner: String!, $name: String!) {
-  rateLimit { cost }
-  repository(owner: $owner, name: $name) { id createdAt }
-}
-"""
-
 ACTOR_FRAGMENT = """
 fragment LifecycleActor on Actor {
   __typename

@@ -58,7 +58,7 @@ def _parser() -> argparse.ArgumentParser:
             "--start",
             metavar="YYYY-MM",
             help=(
-                "default: earliest history (creation month in monthly mode)"
+                "default: earliest history"
                 if backfilling
                 else "default: latest report month, recollected; backfill if none exist"
             ),
@@ -66,27 +66,7 @@ def _parser() -> argparse.ArgumentParser:
         command.add_argument(
             "--end", metavar="YYYY-MM", help="default: current UTC month"
         )
-        command.add_argument(
-            "--mode",
-            choices=("history", "monthly") if backfilling else ("range", "monthly"),
-            default="history" if backfilling else "range",
-            help=(
-                "default: history (one full traversal)"
-                if backfilling
-                else "default: range (one interval traversal); empty destination uses full backfill"
-            ),
-        )
         command.add_argument("--output-directory", required=True, type=Path)
-        command.add_argument(
-            "--discovery",
-            choices=("full", "bounded"),
-            default=None if backfilling else "bounded",
-            help=(
-                "monthly mode only; default: bounded (experimental)"
-                if backfilling
-                else "default: bounded (experimental); full-history fallback always uses full"
-            ),
-        )
         _verbosity(command)
     summary = commands.add_parser(
         "summarize",
@@ -108,7 +88,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command != "summarize":
         try:
             if args.command == "backfill":
-                _validate_request(*args.repository, args.discovery, args.mode)
+                _validate_request(*args.repository)
             args.end = _validate_optional_range(args.start, args.end, now)
         except ValueError as exc:
             parser.error(str(exc))
@@ -138,8 +118,6 @@ def main(argv: list[str] | None = None) -> int:
                 args.start,
                 args.end,
                 output_directory=args.output_directory,
-                discovery=args.discovery,
-                mode=args.mode,
                 on_written=saved,
                 now=now,
             )
@@ -154,8 +132,6 @@ def main(argv: list[str] | None = None) -> int:
                 start,
                 args.end,
                 output_directory=args.output_directory,
-                discovery=args.discovery,
-                mode=args.mode,
                 on_written=saved,
                 now=now,
                 expected_repository_id=repository_id,

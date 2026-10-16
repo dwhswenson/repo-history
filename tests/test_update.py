@@ -1,6 +1,7 @@
 """Update inference, single-pass interval collection, and failure preservation."""
 
 from collections import Counter
+from copy import deepcopy
 from dataclasses import replace
 from urllib.parse import parse_qs, urlsplit
 
@@ -9,11 +10,70 @@ import pytest
 import repo_history as api
 from repo_history import cli, history, update
 
+from . import test_history
 from .helpers import Response, repository
 from .test_collection import comment, connection, parent
 from .test_discovery import hydrated, rest_parent
-from .test_history import NOW, requests
-from .test_history import session as session
+from .test_history import NOW
+
+history_session = test_history.session
+
+
+@pytest.fixture
+def session(history_session, monkeypatch):
+    """Replay REST discovery and hydration against the shared lifecycle history."""
+    result = history_session
+    post = result.post
+
+    def parents():
+        values = []
+        for field, operation, issues in (
+            ("issues", "RepositoryIssues", True),
+            ("pullRequests", "RepositoryPullRequests", False),
+        ):
+            page = result.pages[(operation, "R_example", None)]
+            for item in page.body["data"]["node"][field]["nodes"]:
+                item = deepcopy(item)
+                item["number"] = 1 if issues else 2
+                item["__typename"] = "Issue" if issues else "PullRequest"
+                values.append((issues, item))
+        return values
+
+    def get(url, **kwargs):
+        result.calls.append((url, deepcopy(kwargs)))
+        return Response(
+            [
+                rest_parent(
+                    item["number"],
+                    pr=not issues,
+                    created_at=item["createdAt"],
+                    updated_at="2024-09-01T00:00:00Z",
+                )
+                for issues, item in parents()
+            ]
+        )
+
+    def hydrate(endpoint, **kwargs):
+        payload = kwargs["json"]
+        if payload["operationName"] == "HydrateRepositoryParents":
+            result.calls.append((endpoint, deepcopy(kwargs)))
+            by_number = {item["number"]: item for _, item in parents()}
+            return hydrated(
+                *(
+                    by_number[value]
+                    for key, value in payload["variables"].items()
+                    if key.startswith("number")
+                )
+            )
+        return post(endpoint, **kwargs)
+
+    monkeypatch.setattr(result, "get", get)
+    monkeypatch.setattr(result, "post", hydrate)
+    return result
+
+
+def requests(session):
+    return [kwargs["json"] for _, kwargs in session.calls if "json" in kwargs]
 
 
 @pytest.fixture(autouse=True)
@@ -55,7 +115,7 @@ def test_latest_month_recollected_and_earlier_gaps_untouched(session, tmp_path, 
     before = old.read_bytes()
     (tmp_path / "2025-03.json").mkdir()
     (tmp_path / "manifest.json").write_text("ignored")
-    assert run(tmp_path, "--discovery", "full") == 0
+    assert run(tmp_path) == 0
     assert old.read_bytes() == before
     assert not (tmp_path / "2024-01.json").exists()
     assert api.report_from_json(latest.read_text()).activities
@@ -74,10 +134,7 @@ def test_latest_month_recollected_and_earlier_gaps_untouched(session, tmp_path, 
 
 def test_explicit_start_and_end_override_latest(session, tmp_path, empty):
     seed(tmp_path, empty, "2024-03")
-    assert (
-        run(tmp_path, "--start", "2024-01", "--end", "2024-02", "--discovery", "full")
-        == 0
-    )
+    assert run(tmp_path, "--start", "2024-01", "--end", "2024-02") == 0
     assert (tmp_path / "2024-01.json").exists()
     assert (tmp_path / "2024-02.json").exists()
     assert not (tmp_path / "2024-04.json").exists()
@@ -99,10 +156,7 @@ def test_no_reports_falls_back_to_history(session, tmp_path, destination):
 
 
 def test_explicit_start_empty_directory_uses_range(session, tmp_path):
-    assert (
-        run(tmp_path, "--start", "2024-02", "--end", "2024-03", "--discovery", "full")
-        == 0
-    )
+    assert run(tmp_path, "--start", "2024-02", "--end", "2024-03") == 0
     assert sorted(p.name for p in tmp_path.iterdir()) == [
         "2024-02.json",
         "2024-03.json",
@@ -138,20 +192,17 @@ def test_identity_checked_before_traversal(session, tmp_path, empty):
     assert len(session.calls) == 1
 
 
-def test_full_range_matches_independent_months(session, tmp_path):
-    assert (
-        run(tmp_path, "--start", "2024-01", "--end", "2024-04", "--discovery", "full")
-        == 0
-    )
+def test_range_matches_independent_months(session, tmp_path):
+    assert run(tmp_path, "--start", "2024-01", "--end", "2024-04") == 0
     for month in range(1, 5):
         grouped = api.report_from_json(
             (tmp_path / f"2024-{month:02d}.json").read_text()
         )
-        monthly = api.collect_month("o", "r", 2024, month, discovery="full")
+        monthly = api.collect_month("o", "r", 2024, month)
         assert grouped.activities == monthly.activities
         assert grouped.actors == monthly.actors
         assert grouped.summaries == monthly.summaries
-        assert grouped.metadata.parent_discovery == "full"
+        assert grouped.metadata.parent_discovery == "bounded"
         assert grouped.metadata.commit_history == "bounded"
 
 
@@ -181,7 +232,7 @@ def test_failure_preservation(session, tmp_path, empty, monkeypatch, failure, ca
             return writer(report, directory)
 
         monkeypatch.setattr(update, "_write_report", fail)
-    assert run(tmp_path, "--discovery", "full") == 1
+    assert run(tmp_path) == 1
     assert not (tmp_path / "2024-03.json").exists()
     if failure == "writing":
         assert old.read_bytes() != before
@@ -201,7 +252,7 @@ def test_destination_validated_once(session, tmp_path, empty, monkeypatch):
         return check(*args)
 
     monkeypatch.setattr(update, "_check_directory", checked)
-    assert run(tmp_path, "--discovery", "full") == 0
+    assert run(tmp_path) == 0
     assert len(checks) == 1
 
 
@@ -295,13 +346,10 @@ def test_range_empty_repository(session, tmp_path, enabled):
     )
     session.add("RepositoryIssues", "R_example", connection("issues"))
     session.add("RepositoryPullRequests", "R_example", connection("pullRequests"))
-    assert (
-        run(tmp_path, "--start", "2023-12", "--end", "2024-01", "--discovery", "full")
-        == 0
-    )
+    assert run(tmp_path, "--start", "2023-12", "--end", "2024-01") == 0
     for month in ("2023-12", "2024-01"):
         report = api.report_from_json((tmp_path / f"{month}.json").read_text())
         assert report.activities == report.actors == ()
     operations = [p["operationName"] for p in requests(session)]
     assert "CommitHistory" not in operations
-    assert ("RepositoryIssues" in operations) == enabled
+    assert "HydrateRepositoryParents" not in operations

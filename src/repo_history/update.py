@@ -37,26 +37,18 @@ def _run_update(
     output_directory,
     expected_repository_id,
     now,
-    mode="range",
-    discovery="bounded",
     on_written=None,
     token=None,
 ):
     """Update a prevalidated destination and resolved inclusive range."""
-    if start is None or mode == "monthly":
-        fallback_mode = "monthly" if mode == "monthly" else "history"
-        if start is None:
-            LOG.info(
-                "No monthly reports found; falling back to %s backfill", fallback_mode
-            )
+    if start is None:
+        LOG.info("No monthly reports found; falling back to history backfill")
         return _run_backfill(
             owner,
             repo,
             start,
             end,
             output_directory=output_directory,
-            mode=fallback_mode,
-            discovery=discovery if fallback_mode == "monthly" else None,
             now=now,
             token=token,
             on_written=on_written,
@@ -72,7 +64,7 @@ def _run_update(
         started=now,
         start=first,
         end=after,
-        discovery=discovery,
+        discovery="bounded",
     )
     reports = _history_to_months(
         history,
