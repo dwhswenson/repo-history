@@ -83,7 +83,6 @@ def _collect_snapshot(
                     operation="RepositoryLookup",
                 )
             discovery = select_strategy(start, discovery)
-            embedded = discovery == "full"
             records = _Records()
             for issues, parent, operation in discover_parents(
                 client,
@@ -91,7 +90,7 @@ def _collect_snapshot(
                 start,
                 end,
                 strategy=discovery,
-                include_activity=embedded,
+                include_activity=True,
             ):
                 _collect_parent(
                     client,
@@ -101,7 +100,7 @@ def _collect_snapshot(
                     end,
                     records,
                     issues=issues,
-                    initial_pages=embedded,
+                    initial_pages=True,
                 )
             commit_strategy = collect_commits(client, repository, start, end, records)
             limitations = COVERAGE_LIMITATIONS

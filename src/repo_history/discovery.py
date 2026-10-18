@@ -134,13 +134,16 @@ def discover_parents(
             retained[number] = issues
 
     candidates = list(retained.items())
-    for offset in range(0, len(candidates), 50):
-        batch = candidates[offset : offset + 50]
+    batch_size = HISTORY_PARENT_PAGE_SIZE if include_activity else 50
+    for offset in range(0, len(candidates), batch_size):
+        batch = candidates[offset : offset + batch_size]
         variables = {"id": repository.repository_node_id}
         variables.update({f"number{i}": number for i, (number, _) in enumerate(batch)})
         operation = "HydrateRepositoryParents"
         data = client.execute(
-            parent_hydration_query(len(batch)), variables, operation_name=operation
+            parent_hydration_query(len(batch), include_activity=include_activity),
+            variables,
+            operation_name=operation,
         )
         node = data.get("node")
         if not isinstance(node, dict):

@@ -357,6 +357,118 @@ def test_invalid_hydration_batch_size(count):
         parent_hydration_query(count)
 
 
+@pytest.mark.parametrize("kind", ["issues", "prs", "mixed"])
+@pytest.mark.parametrize(
+    "include_activity,count,sizes", [(True, 41, [20, 20, 1]), (False, 51, [50, 1])]
+)
+def test_discovery_hydration_batch_limits(
+    session, kind, include_activity, count, sizes
+):
+    from repo_history.discovery import discover_parents
+    from repo_history.repository import lookup_repository
+
+    parents, rest = [], []
+    for number in range(1, count + 1):
+        pr = kind == "prs" or (kind == "mixed" and number % 2 == 0)
+        item = parent(
+            f"P_{number}", number=number, __typename="PullRequest" if pr else "Issue"
+        )
+        if include_activity:
+            fields = ["timelineItems", "comments"]
+            if pr:
+                fields += ["reviews", "reviewThreads"]
+            for field in fields:
+                item.update(connection(field).body["data"]["node"])
+        parents.append(item)
+        rest.append(rest_parent(number, pr=pr))
+    session.responses = [repository(hasIssuesEnabled=True), Response(rest)]
+    offset = 0
+    for size in sizes:
+        session.responses.append(hydrated(*parents[offset : offset + size]))
+        offset += size
+    with api.GraphQLClient("test") as client:
+        repo = lookup_repository(client, "o", "r")
+        collected = list(
+            discover_parents(
+                client,
+                repo,
+                datetime(2024, 2, 1, tzinfo=timezone.utc),
+                datetime(2024, 3, 1, tzinfo=timezone.utc),
+                strategy="bounded",
+                include_activity=include_activity,
+            )
+        )
+    assert [item for _, item, _ in collected] == parents
+    assert [issues for issues, _, _ in collected] == [
+        item["__typename"] == "Issue" for item in parents
+    ]
+    payloads = [kw["json"] for _, kw in session.calls if "json" in kw]
+    hydration = [
+        p for p in payloads if p["operationName"] == "HydrateRepositoryParents"
+    ]
+    assert [len(p["variables"]) - 1 for p in hydration] == sizes
+    assert all(("...HistoryIssue" in p["query"]) == include_activity for p in hydration)
+    assert not session.responses
+    assert session.closed
+
+
+@pytest.mark.parametrize("batch", [0, 1])
+@pytest.mark.parametrize("failure", ["missing", "number", "type", "resource"])
+def test_enriched_hydration_validates_whole_batch_and_never_falls_back(
+    session, monkeypatch, batch, failure
+):
+    from repo_history.discovery import discover_parents
+    from repo_history.repository import lookup_repository
+
+    monkeypatch.setattr("repo_history.transport.time.sleep", lambda _: None)
+    parents = [
+        parent(f"P_{n}", number=n, __typename="PullRequest") for n in range(1, 23)
+    ]
+    batches = [hydrated(*parents[:20]), hydrated(*parents[20:])]
+    # Corrupt the last alias: no preceding parent in that batch may be yielded.
+    node = batches[batch].body["data"]["node"]
+    alias = f"parent{len(node) - 1}"
+    if failure == "missing":
+        del node[alias]
+    elif failure == "number":
+        node[alias]["number"] = 100
+    elif failure == "type":
+        node[alias]["__typename"] = "Issue"
+    else:
+        batches[batch] = errors("MAX_NODE_LIMIT_EXCEEDED")
+    session.responses = [
+        repository(),
+        Response([rest_parent(n, pr=True) for n in range(1, 23)]),
+        *batches[:batch],
+        *([batches[batch]] * (4 if failure == "resource" else 1)),
+    ]
+    collected = []
+    with api.GraphQLClient("test") as client:
+        repo = lookup_repository(client, "o", "r")
+        with pytest.raises(api.GraphQLError):
+            for item in discover_parents(
+                client,
+                repo,
+                datetime(2024, 2, 1, tzinfo=timezone.utc),
+                datetime(2024, 3, 1, tzinfo=timezone.utc),
+                strategy="bounded",
+                include_activity=True,
+            ):
+                collected.append(item)
+    assert len(collected) == batch * 20
+    payloads = [kw["json"] for _, kw in session.calls if "json" in kw]
+    assert {p["operationName"] for p in payloads} == {
+        "RepositoryLookup",
+        "HydrateRepositoryParents",
+    }
+    hydration = [
+        p for p in payloads if p["operationName"] == "HydrateRepositoryParents"
+    ]
+    if failure == "resource":
+        assert all(p == hydration[-1] for p in hydration[-4:])
+    assert session.closed
+
+
 class SourceSession(Session):
     """Serve both APIs from one history, including the REST endpoint's actual filter."""
 

@@ -456,23 +456,33 @@ query RepositoryPullRequests($id: ID!, $first: Int!, $after: String) {
 )
 
 
-def parent_hydration_query(count: int) -> str:
+def parent_hydration_query(count: int, *, include_activity: bool = False) -> str:
     """Build aliases from batch positions; repository and item values stay variables."""
     if type(count) is not int or not 1 <= count <= 50:
         raise ValueError("hydration batch size must be between 1 and 50")
+    fragments = ACTOR_FRAGMENT + ISSUE_SUBJECT_FRAGMENT + PR_SUBJECT_FRAGMENT
+    issue_fragment, pr_fragment = "LifecycleIssue", "LifecyclePullRequest"
+    if include_activity:
+        fragments += (
+            ISSUE_EVENTS_FRAGMENT
+            + MERGE_EVENT_FRAGMENT
+            + COMMENT_FRAGMENT
+            + PAGE_INFO_FRAGMENT
+            + _HISTORY_ISSUE_FRAGMENT
+            + _HISTORY_PR_FRAGMENT
+        )
+        issue_fragment, pr_fragment = "HistoryIssue", "HistoryPullRequest"
     declarations = ", ".join(f"$number{i}: Int!" for i in range(count))
     fields = "\n".join(
         f"""parent{i}: issueOrPullRequest(number: $number{i}) {{
           __typename
-          ...LifecycleIssue
-          ...LifecyclePullRequest
+          ...{issue_fragment}
+          ...{pr_fragment}
         }}"""
         for i in range(count)
     )
     return (
-        ACTOR_FRAGMENT
-        + ISSUE_SUBJECT_FRAGMENT
-        + PR_SUBJECT_FRAGMENT
+        fragments
         + f"""
 query HydrateRepositoryParents($id: ID!, {declarations}) {{
   rateLimit {{ cost }}

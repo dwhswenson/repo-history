@@ -1,5 +1,9 @@
 """Tests for the reusable GraphQL query documents and fragments."""
 
+import re
+
+import pytest
+
 from repo_history.queries import PAGE_INFO_FRAGMENT, REPOSITORY_QUERY
 
 
@@ -93,3 +97,31 @@ def test_comment_and_review_queries_paginate_one_connection_without_bodies():
     assert "pullRequestReview { id }" in THREAD_COMMENTS_QUERY
     assert "comments(first:" not in PR_REVIEWS_QUERY
     assert "comments(first:" not in PR_THREADS_QUERY
+
+
+@pytest.mark.parametrize("count", [1, 20])
+def test_activity_hydration_reuses_complete_history_fragments(count):
+    from repo_history.queries import (
+        _HISTORY_ISSUE_FRAGMENT,
+        _HISTORY_PR_FRAGMENT,
+        parent_hydration_query,
+    )
+
+    query = parent_hydration_query(count, include_activity=True)
+    definitions = re.findall(r"fragment (\w+) on", query)
+    spreads = set(re.findall(r"\.\.\.(\w+)", query))
+    assert len(definitions) == len(set(definitions))
+    assert spreads == set(definitions)
+    assert _HISTORY_ISSUE_FRAGMENT in query
+    assert _HISTORY_PR_FRAGMENT in query
+    assert query.count("issueOrPullRequest(number: $number") == count
+    assert f"$number{count - 1}: Int!" in query
+    assert "reviews(first: 20)" in query
+    assert "reviewThreads(first: 10)" in query
+    assert "comments(first: 20)" in query
+    assert "body" not in query and "since:" not in query
+
+    lean = parent_hydration_query(count)
+    assert lean == parent_hydration_query(count, include_activity=False)
+    assert "HistoryIssue" not in lean and "HistoryPullRequest" not in lean
+    assert "timelineItems" not in lean and "comments(first:" not in lean

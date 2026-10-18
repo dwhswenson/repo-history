@@ -72,6 +72,54 @@ snapshot stays in memory; interruption requires a fresh traversal.
 
 ## Monthly collector optimization plan
 
+### Implemented: embedded activity pages in CLI update
+
+CLI updates reuse the history collector's issue/PR activity fragments and
+embedded-page traversal after bounded REST discovery. GraphQL hydration batches
+contain at most 20 parents, with first pages of 20 activity items and 10 review
+threads; each thread embeds up to 20 inline comments. Only overflowing
+connections need follow-up requests. Later thread pages keep embedding inline
+comments. Ordinary activity and inline-comment continuations request up to 100
+items, while thread continuations request up to 10.
+
+Standalone `collect_month` retains metadata-only hydration in batches of 50 and
+separate activity requests. This provides an independent bounded reference for
+output comparisons. Full-history backfill continues using its existing queries.
+
+The deterministic `tests/test_update.py` comparison uses identical source data
+for February 2024, with one issue, one PR, and one review thread. Both paths
+include repository lookup, one REST discovery request, one hydration request,
+and the same buffered commit collection and actor resolution:
+
+| Activity pagination | Metadata-only reference requests | Embedded update requests | Reduction |
+|---|---:|---:|---:|
+| All activity connections fit in first pages | 13 | 6 | 54% |
+| Independent activity overflow pages | 18 | 11 | 39% |
+
+Both fixtures save seven requests: two issue activity first pages, four PR
+activity first pages, and one thread-comment first page. The comparisons assert
+identical activities, actors, summaries, and coverage limitations. Separate
+tests cover every activity connection's overflow, inline-comment overflow on
+later thread pages, enriched batches of 20/20/1, and report/state preservation
+after malformed embedded pages or pagination failures. Reproduce counts with:
+
+```text
+pixi run -e dev python -m pytest tests/test_update.py::test_embedded_update_request_measurement -q -s
+```
+
+These are offline fixture request counts, not measured live runtime or API cost
+savings. The simulated pages do not model every effect of different page sizes:
+20-item embedded first pages can require extra continuations compared with
+standalone 100-item first pages, and 20-parent hydration batches can require more
+requests than 50-parent batches. Live measurements should include those costs,
+actual GraphQL points, retries, throttling, and response sizes.
+
+Activity date filtering remains local, and retained parents' histories are still
+exhausted. This optimization adds no persistent cache, date pruning, concurrency,
+or changes to discovery/commit completeness assumptions. Missing embedded pages
+fail collection without falling back to separate first-page requests. Hydration
+uses existing transport retries without adaptive alias-batch splitting.
+
 The remaining plan below concerns bounded collection through `collect_month` and
 CLI updates.
 It is independent of history-first backfill and its full parent discovery.

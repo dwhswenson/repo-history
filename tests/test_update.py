@@ -12,11 +12,21 @@ from repo_history import cli, history, update
 
 from . import test_history
 from .helpers import Response, replace, repository
-from .test_collection import comment, connection, parent
+from .test_collection import comment, connection, inline, parent, thread
 from .test_discovery import hydrated, rest_parent
 from .test_history import NOW
 
 history_session = test_history.session
+
+ACTIVITY_CONNECTIONS = {
+    "IssueLifecycle": "timelineItems",
+    "IssueComments": "comments",
+    "PullRequestLifecycle": "timelineItems",
+    "PullRequestComments": "comments",
+    "PullRequestReviews": "reviews",
+    "PullRequestReviewThreads": "reviewThreads",
+    "ReviewThreadComments": "comments",
+}
 
 
 @pytest.fixture
@@ -58,13 +68,19 @@ def session(history_session, monkeypatch):
         if payload["operationName"] == "HydrateRepositoryParents":
             result.calls.append((endpoint, deepcopy(kwargs)))
             by_number = {item["number"]: item for _, item in parents()}
-            return hydrated(
-                *(
-                    by_number[value]
-                    for key, value in payload["variables"].items()
-                    if key.startswith("number")
-                )
-            )
+            items = [
+                by_number[value]
+                for key, value in payload["variables"].items()
+                if key.startswith("number")
+            ]
+            for item in items:
+                issues = item["__typename"] == "Issue"
+                fragment = "HistoryIssue" if issues else "HistoryPullRequest"
+                if f"...{fragment}" in payload["query"]:
+                    result.embed_parent(item, issues=issues)
+            response = hydrated(*items)
+            response.body["data"]["rateLimit"] = {"cost": 1}
+            return response
         return post(endpoint, **kwargs)
 
     monkeypatch.setattr(result, "get", get)
@@ -211,6 +227,10 @@ def test_range_matches_independent_months(session, tmp_path):
         assert grouped.activities == monthly.activities
         assert grouped.actors == monthly.actors
         assert grouped.summaries == monthly.summaries
+        assert (
+            grouped.metadata.coverage.limitations
+            == monthly.metadata.coverage.limitations
+        )
         assert grouped.metadata.provenance.last_updated_by.parent_discovery == "bounded"
         assert grouped.metadata.provenance.last_updated_by.commit_history == "bounded"
 
@@ -273,18 +293,23 @@ def test_bounded_range_one_discovery_and_monthly_equivalence(
     from .test_commits import commit, page
     from .test_commits import history as commit_history
 
-    def make_session():
+    def make_session(*, include_activity=False):
         result = Session()
-        result.responses = [
-            repository(createdAt="2024-01-01T00:00:00Z", hasIssuesEnabled=enabled),
-            Response([rest_parent(pr=True, updated_at="2024-09-01T00:00:00Z")]),
-            hydrated(
-                parent("P", __typename="PullRequest", date="2024-02-01T00:00:00Z")
-            ),
+        item = parent("P", __typename="PullRequest", date="2024-02-01T00:00:00Z")
+        activity_pages = [
             connection("timelineItems"),
             connection("comments", [comment(createdAt="2024-03-01T00:00:00Z")]),
             connection("reviews"),
             connection("reviewThreads"),
+        ]
+        if include_activity:
+            for response in activity_pages:
+                item.update(response.body["data"]["node"])
+        result.responses = [
+            repository(createdAt="2024-01-01T00:00:00Z", hasIssuesEnabled=enabled),
+            Response([rest_parent(pr=True, updated_at="2024-09-01T00:00:00Z")]),
+            hydrated(item),
+            *(activity_pages if not include_activity else []),
             commit_history(
                 [
                     commit(
@@ -299,7 +324,7 @@ def test_bounded_range_one_discovery_and_monthly_equivalence(
         ]
         return result
 
-    result = make_session()
+    result = make_session(include_activity=True)
     monkeypatch.setattr("requests.Session", lambda: result)
     monkeypatch.setattr(history, "_utc_now", lambda: NOW)
     monkeypatch.setattr("repo_history.collection._utc_now", lambda: NOW)
@@ -321,7 +346,12 @@ def test_bounded_range_one_discovery_and_monthly_equivalence(
         )
         monthly = api.collect_month("o", "r", 2024, month)
         assert grouped.activities == monthly.activities
+        assert grouped.actors == monthly.actors
         assert grouped.summaries == monthly.summaries
+        assert (
+            grouped.metadata.coverage.limitations
+            == monthly.metadata.coverage.limitations
+        )
         assert (
             grouped.metadata.provenance.last_updated_by.parent_discovery
             == grouped.metadata.provenance.last_updated_by.commit_history
@@ -364,3 +394,187 @@ def test_range_empty_repository(session, tmp_path, enabled):
     operations = [p["operationName"] for p in requests(session)]
     assert "CommitHistory" not in operations
     assert "HydrateRepositoryParents" not in operations
+
+
+@pytest.mark.parametrize("paginated", [False, True])
+def test_embedded_update_request_measurement(session, tmp_path, paginated):
+    if not paginated:
+        # Same source history, with each activity connection fitting in one page.
+        for (operation, node_id, after), response in list(session.pages.items()):
+            if after is not None or operation not in ACTIVITY_CONNECTIONS:
+                continue
+            field = ACTIVITY_CONNECTIONS[operation]
+            page = deepcopy(response.body["data"]["node"][field])
+            while page["pageInfo"]["hasNextPage"]:
+                cursor = page["pageInfo"]["endCursor"]
+                following = session.pages[(operation, node_id, cursor)]
+                following = following.body["data"]["node"][field]
+                page["nodes"].extend(deepcopy(following["nodes"]))
+                page["pageInfo"] = deepcopy(following["pageInfo"])
+            session.add(operation, node_id, connection(field, page["nodes"]))
+
+    assert run(tmp_path, "--start", "2024-02", "--end", "2024-02") == 0
+    optimized = api.report_from_json((tmp_path / "2024-02.json").read_text())
+    optimized_calls = list(session.calls)
+    optimized_payloads = requests(session)
+    nested = [
+        p for p in optimized_payloads if p["operationName"] in ACTIVITY_CONNECTIONS
+    ]
+    assert all(p["variables"]["after"] is not None for p in nested)
+    if paginated:
+        assert {(p["operationName"], p["variables"]["after"]) for p in nested} == {
+            ("IssueLifecycle", "e"),
+            ("IssueComments", "c"),
+            ("PullRequestReviews", "v"),
+            ("PullRequestReviewThreads", "t"),
+            ("ReviewThreadComments", "tc"),
+        }
+    else:
+        assert not nested
+    session.calls.clear()
+    reference = api.collect_month("o", "r", 2024, 2, token="test")
+    assert optimized.activities == reference.activities
+    assert optimized.actors == reference.actors
+    assert optimized.summaries == reference.summaries
+    assert (
+        optimized.metadata.coverage.limitations
+        == reference.metadata.coverage.limitations
+    )
+    assert len(session.calls) - len(optimized_calls) == 7  # 2/issue + 4/PR + 1/thread
+    assert (len(optimized_calls), len(session.calls)) == (
+        (11, 18) if paginated else (6, 13)
+    )
+    for calls in (optimized_calls, session.calls):
+        assert sum("json" not in kw for _, kw in calls) == 1
+        assert (
+            sum(
+                kw.get("json", {}).get("operationName") == "HydrateRepositoryParents"
+                for _, kw in calls
+            )
+            == 1
+        )
+    print(
+        f"bounded fixture paginated={paginated}: embedded update "
+        f"{len(optimized_calls)} requests; metadata-only reference {len(session.calls)}"
+    )
+
+
+def test_update_all_activity_overflows_and_later_thread_comments(session, tmp_path):
+    # Give each parent connection its own first continuation, including otherwise
+    # complete PR connections. The existing fixture adds further overflow pages.
+    for operation, field in ACTIVITY_CONNECTIONS.items():
+        if operation == "ReviewThreadComments":
+            continue
+        node_id = "I" if operation.startswith("Issue") else "P"
+        first = deepcopy(session.pages[(operation, node_id, None)])
+        cursor = f"{operation}-next"
+        session.add(operation, node_id, connection(field, more=True, cursor=cursor))
+        session.add(operation, node_id, first, after=cursor)
+    session.add(
+        "PullRequestReviewThreads",
+        "P",
+        connection("reviewThreads", [thread("T_later", isResolved=False)]),
+        after="t",
+    )
+    session.add(
+        "ReviewThreadComments",
+        "T_later",
+        connection("comments", [inline("C_later")], more=True, cursor="later-comments"),
+    )
+    session.add(
+        "ReviewThreadComments",
+        "T_later",
+        connection("comments", [inline("C_reply")], more=True, cursor="last-comments"),
+        after="later-comments",
+    )
+    session.add(
+        "ReviewThreadComments",
+        "T_later",
+        connection("comments", [inline("C_last")]),
+        after="last-comments",
+    )
+    assert run(tmp_path, "--start", "2024-01", "--end", "2024-03") == 0
+    nested = [
+        p for p in requests(session) if p["operationName"] in ACTIVITY_CONNECTIONS
+    ]
+    assert {p["operationName"] for p in nested} == set(ACTIVITY_CONNECTIONS)
+    for payload in nested:
+        assert payload["variables"]["after"] is not None
+        if payload["operationName"] == "PullRequestReviewThreads":
+            assert payload["variables"]["first"] == 10
+            assert "comments(first: 20)" in payload["query"]
+        else:
+            assert payload["variables"]["first"] == 100
+    assert {
+        p["variables"]["after"]
+        for p in nested
+        if p["operationName"] == "ReviewThreadComments"
+        and p["variables"]["id"] == "T_later"
+    } == {"later-comments", "last-comments"}
+    for month in (1, 2, 3):
+        actual = api.report_from_json((tmp_path / f"2024-{month:02d}.json").read_text())
+        reference = api.collect_month("o", "r", 2024, month, token="test")
+        assert actual.activities == reference.activities
+        assert actual.actors == reference.actors
+        assert actual.summaries == reference.summaries
+
+
+@pytest.mark.parametrize(
+    "operation,node_id",
+    [
+        ("IssueLifecycle", "I"),
+        ("IssueComments", "I"),
+        ("PullRequestLifecycle", "P"),
+        ("PullRequestComments", "P"),
+        ("PullRequestReviews", "P"),
+        ("PullRequestReviewThreads", "P"),
+        ("ReviewThreadComments", "T_one"),
+    ],
+)
+@pytest.mark.parametrize("failure", ["missing", "malformed", "cursor", "loop"])
+def test_bad_embedded_update_preserves_reports_and_state(
+    session, tmp_path, monkeypatch, operation, node_id, failure
+):
+    assert run(tmp_path, "--start", "2024-02", "--end", "2024-03") == 0
+    before = {path.name: path.read_bytes() for path in tmp_path.iterdir()}
+    field = ACTIVITY_CONNECTIONS[operation]
+    page = session.pages[(operation, node_id, None)].body["data"]["node"][field]
+    if failure == "missing":
+        # Remove the selected connection from the hydrated response after embedding.
+        post = session.post
+
+        def incomplete(endpoint, **kwargs):
+            response = post(endpoint, **kwargs)
+            if kwargs["json"]["operationName"] == "HydrateRepositoryParents":
+                for item in response.body["data"]["node"].values():
+                    if item["id"] == node_id:
+                        del item[field]
+                    elif (
+                        operation == "ReviewThreadComments" and "reviewThreads" in item
+                    ):
+                        for value in item["reviewThreads"]["nodes"]:
+                            if value["id"] == node_id:
+                                del value["comments"]
+            return response
+
+        monkeypatch.setattr(session, "post", incomplete)
+    elif failure == "malformed":
+        page["pageInfo"] = None
+    elif failure == "cursor":
+        page["pageInfo"] = {"hasNextPage": True, "endCursor": None}
+    else:
+        page["pageInfo"] = {"hasNextPage": True, "endCursor": "loop"}
+        session.add(
+            operation,
+            node_id,
+            connection(field, more=True, cursor="loop"),
+            after="loop",
+        )
+    session.calls.clear()
+    assert run(tmp_path, "--start", "2024-02", "--end", "2024-04") == 1
+    assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == before
+    assert not any(
+        p["operationName"] == operation and p["variables"].get("after") is None
+        for p in requests(session)
+    )
+    assert session.closed

@@ -69,21 +69,24 @@ class HistorySession(Session):
 
     def embed_parents(self, response, field, *, issues):
         for item in response.body["data"]["node"][field]["nodes"]:
-            connections = {
-                "timelineItems": "IssueLifecycle" if issues else "PullRequestLifecycle",
-                "comments": "IssueComments" if issues else "PullRequestComments",
-            }
-            if not issues:
-                connections.update(
-                    reviews="PullRequestReviews",
-                    reviewThreads="PullRequestReviewThreads",
-                )
-            for name, operation in connections.items():
-                item[name] = deepcopy(
-                    self.pages[(operation, item["id"], None)].body["data"]["node"][name]
-                )
-            if not issues:
-                self.embed_threads(item["reviewThreads"])
+            self.embed_parent(item, issues=issues)
+
+    def embed_parent(self, item, *, issues):
+        connections = {
+            "timelineItems": "IssueLifecycle" if issues else "PullRequestLifecycle",
+            "comments": "IssueComments" if issues else "PullRequestComments",
+        }
+        if not issues:
+            connections.update(
+                reviews="PullRequestReviews",
+                reviewThreads="PullRequestReviewThreads",
+            )
+        for name, operation in connections.items():
+            item[name] = deepcopy(
+                self.pages[(operation, item["id"], None)].body["data"]["node"][name]
+            )
+        if not issues:
+            self.embed_threads(item["reviewThreads"])
 
     def embed_threads(self, connection):
         for item in connection["nodes"]:

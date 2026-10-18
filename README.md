@@ -55,7 +55,11 @@ imported commits. Empty months are included. Explicit backfill ranges limit
 output, not the history traversal.
 
 Update collects the requested interval once using experimental
-bounded parent discovery and buffered commit history. Without `--start`, it
+bounded parent discovery and buffered commit history. Candidate issues and PRs
+are hydrated in batches of up to 20 with their first activity pages, reusing
+backfill's embedded-page queries and collectors. Only overflowing activity
+connections require follow-up requests; later review-thread pages also include
+their first inline-comment pages. Without `--start`, it
 selects the latest direct-child `YYYY-MM.json` report filename and **recollects
 that month** through the end month. It replaces every selected report, leaves
 earlier files untouched, and does not repair earlier gaps. An end before the
@@ -291,8 +295,16 @@ issues and PRs in all states, using the resolved current repository name. It
 requests updates since one second before month start, follows every next-page
 link, deduplicates item numbers, and retains parents with `updated_at >= start`
 and `created_at < end`. Updates after month end remain eligible. Candidate
-subjects and authors are hydrated through GraphQL in batches of up to 50 before
-the same nested collectors retrieve their activities. REST PR issue IDs are
+subjects and authors in standalone `collect_month` calls are hydrated through
+GraphQL in batches of up to 50 before the nested collectors retrieve their
+activities. CLI `update` instead hydrates up to 20 parents per batch with first
+activity pages: up to 20 lifecycle events, conversation comments, and reviews,
+plus 10 review threads with up to 20 inline comments each. Complete connections
+need no additional request. Overflow pages retain independent cursors; ordinary
+activity and inline-comment continuations request up to 100 items, while thread
+pages request up to 10 and keep embedding inline-comment pages. Activity date
+filtering remains local; candidate histories outside the requested range are
+still retrieved. Missing or malformed embedded pages fail the run. REST PR issue IDs are
 never used as GraphQL PullRequest IDs. REST uses API version `2026-03-10`.
 
 **Bounded discovery is experimental.** It has not been established that every
