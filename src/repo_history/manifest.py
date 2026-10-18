@@ -11,6 +11,7 @@ from pathlib import Path
 
 from jsonschema import Draft202012Validator, FormatChecker
 
+from ._progress import emit
 from .errors import ReportValidationError, ReportWriteError
 from .models import ACTIVITY_TYPES, MonthlyReport
 from .serialization import parse_time, report_from_json, to_data
@@ -195,11 +196,17 @@ def write_manifest(
     target = directory / "manifest.json" if output_path is None else Path(output_path)
     if MONTHLY_FILE.fullmatch(target.name):
         raise ReportWriteError("manifest output must not overwrite a monthly report")
+    paths = [
+        path
+        for path in sorted(directory.iterdir())
+        if MONTHLY_FILE.fullmatch(path.name) and not path.is_dir()
+    ]
+    emit("start", stage="Reports", detail="Reading and validating monthly reports")
+    emit("total", stage="Reports", total=len(paths))
 
     def reports():
-        for path in sorted(directory.iterdir()):
-            if not MONTHLY_FILE.fullmatch(path.name) or path.is_dir():
-                continue
+        for path in paths:
+            emit("detail", detail=f"Reading and validating {path.name}")
             if path.resolve() == target.resolve():
                 raise ReportWriteError(
                     "manifest output must not overwrite a source report"
@@ -213,9 +220,13 @@ def write_manifest(
             except (ReportValidationError, UnicodeError) as exc:
                 raise ReportWriteError(f"{path}: invalid report: {exc}") from exc
             yield report
+            emit("advance", stage="Reports")
+        emit("detail", detail="Validating assembled manifest")
 
     # report_from_json has already performed full event and summary validation.
     data = _build_manifest(reports(), check_reports=False)
+    emit("complete", stage="Reports", detail=f"Summarized {len(paths)} monthly reports")
+    emit("phase", stage="Manifest", detail=f"Saving {target.name}")
     text = (
         json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         + "\n"
@@ -235,9 +246,11 @@ def write_manifest(
             temporary = Path(stream.name)
             stream.write(text)
             stream.flush()
+        emit("detail", detail=f"Verifying {target.name}")
         validate_manifest(json.loads(temporary.read_text(encoding="utf-8")))
         os.replace(temporary, target)
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
+    emit("finish", stage="Completed", detail=f"Saved {target.name}")
     return target

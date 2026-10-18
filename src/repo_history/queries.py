@@ -27,13 +27,15 @@ COMMIT_HISTORY_QUERY = (
     + PAGE_INFO_FRAGMENT
     + """
 query CommitHistory($id: ID!, $head: GitObjectID!, $first: Int!,
-                    $after: String, $since: GitTimestamp, $until: GitTimestamp) {
+                    $after: String, $since: GitTimestamp, $until: GitTimestamp,
+                    $includeProgressTotal: Boolean! = false) {
   rateLimit { cost }
   node(id: $id) {
     ... on Repository {
       object(oid: $head) {
         ... on Commit {
           history(first: $first, after: $after, since: $since, until: $until) {
+            totalCount @include(if: $includeProgressTotal)
             nodes {
               id
               oid
@@ -416,11 +418,13 @@ HISTORY_ISSUES_QUERY = (
     + PAGE_INFO_FRAGMENT
     + _HISTORY_ISSUE_FRAGMENT
     + """
-query RepositoryIssues($id: ID!, $first: Int!, $after: String) {
+query RepositoryIssues($id: ID!, $first: Int!, $after: String,
+                       $includeProgressTotal: Boolean! = false) {
   rateLimit { cost }
   node(id: $id) {
     ... on Repository {
       issues(first: $first, after: $after) {
+        totalCount @include(if: $includeProgressTotal)
         nodes { ...HistoryIssue }
         pageInfo { ...ForwardPageInfo }
       }
@@ -438,11 +442,13 @@ HISTORY_PULL_REQUESTS_QUERY = (
     + PAGE_INFO_FRAGMENT
     + _HISTORY_PR_FRAGMENT
     + """
-query RepositoryPullRequests($id: ID!, $first: Int!, $after: String) {
+query RepositoryPullRequests($id: ID!, $first: Int!, $after: String,
+                             $includeProgressTotal: Boolean! = false) {
   rateLimit { cost }
   node(id: $id) {
     ... on Repository {
       pullRequests(first: $first, after: $after) {
+        totalCount @include(if: $includeProgressTotal)
         nodes { ...HistoryPullRequest }
         pageInfo { ...ForwardPageInfo }
       }

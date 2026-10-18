@@ -5,6 +5,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from time import perf_counter
 
+from ._progress import emit
 from .collection import COVERAGE_LIMITATIONS, _collect_parent, _month_bounds, _Records
 from .commits import BOUNDED_LIMITATION, collect_commits
 from .discovery import BOUNDED_DISCOVERY_LIMITATION, discover_parents, select_strategy
@@ -180,6 +181,8 @@ def _history_to_months(
     end = f"{started.year:04d}-{started.month:02d}" if end is None else end
     year, month = _validate_range(start, end, started)
     last = _parse_month(end)
+    emit("total", stage="Grouping", total=(last[0] - year) * 12 + last[1] - month + 1)
+    emit("detail", detail=f"Indexing {len(history.activities)} activities into months")
     buckets = defaultdict(list)
     for activity in history.activities:
         occurred = activity.occurred_at.astimezone(timezone.utc)
@@ -187,6 +190,7 @@ def _history_to_months(
     actors = {actor.key: actor for actor in history.actors}
     reports = []
     while (year, month) <= last:
+        emit("detail", detail=f"Building and validating {year:04d}-{month:02d}.json")
         first, after = _month_bounds(year, month)
         activities = buckets.get((year, month), ())
         referenced = set()
@@ -222,5 +226,6 @@ def _history_to_months(
                 activities,
             )
         )
+        emit("advance", stage="Grouping")
         year, month = year + (month == 12), month % 12 + 1
     return reports

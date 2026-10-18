@@ -404,6 +404,8 @@ def test_destination_identity_checked_before_traversal(session, tmp_path):
 def test_destination_scanned_once_and_writing_failure_preserves_completed(
     session, tmp_path, monkeypatch
 ):
+    from repo_history._progress import listen
+
     checks = []
     check = backfill_module._check_directory
     monkeypatch.setattr(
@@ -420,7 +422,8 @@ def test_destination_scanned_once_and_writing_failure_preserves_completed(
 
     monkeypatch.setattr(backfill_module, "_write_report", fail_second)
     written = []
-    with pytest.raises(OSError, match="disk full"):
+    events = []
+    with listen(events.append), pytest.raises(OSError, match="disk full"):
         backfill_module._run_backfill(
             "o",
             "r",
@@ -433,9 +436,14 @@ def test_destination_scanned_once_and_writing_failure_preserves_completed(
     assert len(checks) == 1
     assert written == [tmp_path / "2024-01.json"]
     assert not (tmp_path / "2024-02.json").exists()
+    assert len([e for e in events if e.kind == "advance" and e.stage == "Writing"]) == 1
+    assert not any(e.kind == "complete" and e.stage == "Writing" for e in events)
+    assert events[-1].detail == "2024-02.json"
 
 
 def test_invalid_later_report_does_not_write_earlier_month(session, tmp_path):
+    from repo_history._progress import listen
+
     session.add(
         "IssueComments",
         "I",
@@ -443,11 +451,17 @@ def test_invalid_later_report_does_not_write_earlier_month(session, tmp_path):
             "comments", [comment(url="invalid URL", createdAt="2024-03-01T00:00:00Z")]
         ),
     )
-    with pytest.raises(api.ReportValidationError):
+    events = []
+    with listen(events.append), pytest.raises(api.ReportValidationError):
         api.backfill(
             "o", "r", "2024-01", "2024-03", output_directory=tmp_path, token="test"
         )
     assert not list(tmp_path.iterdir())
+    assert (
+        len([e for e in events if e.kind == "advance" and e.stage == "Grouping"]) == 2
+    )
+    assert not any(e.kind == "complete" and e.stage == "Grouping" for e in events)
+    assert not any(e.stage == "Writing" for e in events)
 
 
 @pytest.mark.parametrize(
@@ -726,3 +740,113 @@ def test_parent_page_reduction_retains_embedded_child_limits(session, monkeypatc
     assert [p["variables"]["first"] for p in parents] == [20, 10, 10]
     assert [p["variables"]["after"] for p in parents] == [None, None, "p"]
     assert all("reviews(first: 20)" in p["query"] for p in parents)
+
+
+def test_progress_preserves_reports_and_request_counts(session, tmp_path):
+    from repo_history._progress import listen
+
+    # Totals describe outer items; nested continuation requests must not advance them.
+    for operation, field, total in (
+        ("RepositoryIssues", "issues", 1),
+        ("RepositoryPullRequests", "pullRequests", 1),
+        ("CommitHistory", "history", 2),
+    ):
+        response = session.pages[(operation, "R_example", None)]
+        node = response.body["data"]["node"]
+        connection = (
+            node["object"][field] if operation == "CommitHistory" else node[field]
+        )
+        connection["totalCount"] = total
+
+    paths = api.backfill(
+        "o",
+        "r",
+        "2024-01",
+        "2024-03",
+        output_directory=tmp_path / "plain",
+        token="test",
+    )
+    before = [path.read_bytes() for path in paths]
+    request_count = len(session.calls)
+    session.calls.clear()
+    events = []
+    with listen(events.append):
+        paths = api.backfill(
+            "o",
+            "r",
+            "2024-01",
+            "2024-03",
+            output_directory=tmp_path / "progress",
+            token="test",
+        )
+    assert [path.read_bytes() for path in paths] == before
+    assert len(session.calls) == request_count
+    assert [(e.kind, e.stage) for e in events if e.kind in ("start", "complete")] == [
+        ("start", "Issues"),
+        ("complete", "Issues"),
+        ("start", "PRs"),
+        ("complete", "PRs"),
+        ("start", "Commits"),
+        ("complete", "Commits"),
+        ("start", "Grouping"),
+        ("complete", "Grouping"),
+        ("start", "Writing"),
+        ("complete", "Writing"),
+    ]
+    assert Counter(e.stage for e in events if e.kind == "advance") == {
+        "Issues": 1,
+        "PRs": 1,
+        "Commits": 2,
+        "Grouping": 3,
+        "Writing": 3,
+    }
+    assert [(e.stage, e.total) for e in events if e.kind == "total"] == [
+        ("Issues", 1),
+        ("PRs", 1),
+        ("Commits", 2),
+        ("Grouping", 3),
+        ("Writing", 3),
+    ]
+    pr_complete = next(
+        i for i, e in enumerate(events) if e.kind == "advance" and e.stage == "PRs"
+    )
+    nested_last = max(
+        i for i, e in enumerate(events) if "ReviewThreadComments" in e.detail
+    )
+    assert nested_last < pr_complete
+    assert events[-1].kind == "finish"
+    assert [e.usage for e in events if e.kind == "usage"][-1].points == request_count
+
+
+def test_progress_skips_disabled_connections_and_handles_empty_stages(session):
+    from repo_history._progress import listen
+
+    session.repository.body["data"]["repository"].update(
+        hasIssuesEnabled=False, defaultBranchRef=None, isEmpty=True
+    )
+    session.pages[("RepositoryPullRequests", "R_example", None)] = connection(
+        "pullRequests"
+    )
+    events = []
+    with listen(events.append):
+        collect()
+    assert [
+        (e.kind, e.stage) for e in events if e.kind in ("skipped", "start", "complete")
+    ] == [
+        ("skipped", "Issues"),
+        ("start", "PRs"),
+        ("complete", "PRs"),
+        ("skipped", "Commits"),
+    ]
+    assert not any(e.kind == "advance" for e in events)
+
+
+def test_progress_does_not_complete_parent_after_nested_failure(session):
+    from repo_history._progress import listen
+
+    session.failures[("IssueComments", "I", "c")] = errors("FORBIDDEN")
+    events = []
+    with listen(events.append), pytest.raises(api.GraphQLError):
+        collect()
+    assert not any(e.kind in ("advance", "complete") for e in events)
+    assert events[-1].kind == "usage"

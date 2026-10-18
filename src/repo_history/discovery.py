@@ -4,6 +4,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote, urlencode
 
+from ._progress import emit
 from .errors import GraphQLError, TransportError
 from .queries import (
     HISTORY_ISSUES_QUERY,
@@ -58,8 +59,11 @@ def discover_parents(
     """Traverse using the strategy already selected by select_strategy."""
     if strategy == "full":
         for issues in (True, False):
+            stage = "Issues" if issues else "PRs"
             if issues and not repository.issues_enabled:
+                emit("skipped", stage=stage, detail="Issues are disabled")
                 continue
+            emit("start", stage=stage)
             operation = "RepositoryIssues" if issues else "RepositoryPullRequests"
             query = ISSUES_QUERY if issues else PULL_REQUESTS_QUERY
             if include_activity:
@@ -72,6 +76,8 @@ def discover_parents(
                 page_size=HISTORY_PARENT_PAGE_SIZE if include_activity else 100,
             ):
                 yield issues, item, operation
+                emit("advance", stage=stage)
+            emit("complete", stage=stage)
         return
 
     parts = repository.repository_full_name.split("/")

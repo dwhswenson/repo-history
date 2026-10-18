@@ -2,6 +2,7 @@
 
 from collections.abc import Mapping
 
+from ._progress import emit, enabled
 from .errors import PaginationError
 from .transport import _log_embedded_page
 
@@ -92,6 +93,9 @@ def iter_connection(
     page_number = start_page
     while True:
         values.update({cursor_variable: cursor, page_size_variable: page_size})
+        progress_total = enabled() and "$includeProgressTotal:" in document
+        if progress_total:
+            values["includeProgressTotal"] = page_number == 1
         data, page_size = client._execute(
             document,
             values,
@@ -107,6 +111,13 @@ def iter_connection(
                 )
             connection = connection[key]
         nodes, more, next_cursor = _connection_page(connection, operation_name, seen)
+        if progress_total and page_number == 1:
+            stage = {
+                "RepositoryIssues": "Issues",
+                "RepositoryPullRequests": "PRs",
+                "CommitHistory": "Commits",
+            }[operation_name]
+            emit("total", stage=stage, total=connection.get("totalCount"))
         yield from nodes
         if not more:
             return

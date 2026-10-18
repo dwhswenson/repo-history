@@ -79,7 +79,8 @@ explicit offline step after collection.
 With Pixi, prefix commands with `pixi run`, for example
 `pixi run repo-history --help`.
 
-Each successful month prints its saved path to stdout immediately. Progress and
+Each successful month prints its saved path to stdout immediately, except when
+backfill uses live progress and stdout is a terminal. Progress and
 API usage go to stderr. `--verbose` includes debug diagnostics with `issue=N` or
 `pr=N` on relevant nested requests and retries. Paginated requests include a local
 `page=N` counter; retries keep the same number. Embedded first pages log
@@ -89,6 +90,30 @@ thread's comments. `--quiet` suppresses
 paths and all diagnostics except errors. Exit codes are 0 for success, 2 for
 invalid arguments, and 1 for collection, validation, or filesystem failures.
 Rate-limit errors include available retry/reset guidance and stop the run.
+
+Backfill shows a live Rich display on interactive stderr: persistent Issues, PRs,
+Commits, Grouping, and Writing rows include processed/total items, percentage,
+elapsed time, and approximate per-stage ETA. The current item and operation show
+nested pagination and retries. Items advance only after their history has been processed; totals
+are advisory and unavailable totals use an indeterminate display. Totals are
+requested with the first existing page of each outer connection, without extra
+count requests. A footer updates measured GraphQL points spent by this run,
+requests, retries, unmeasured attempts, and the last observed remaining budget and
+reset time. Budget readings can become stale between responses or when other
+clients use the same credentials; unknown values are shown explicitly.
+
+Redirected stderr and `--verbose` use plain progress messages instead of bars.
+Stage transitions, retries, and completion/failure appear immediately; other
+updates appear at most every 30 seconds when work advances. `backfill --no-progress`
+disables the added progress output and total-count fields, retaining ordinary logs.
+`--quiet` suppresses progress as well as saved paths. Grouping advances after each
+monthly report has been built and validated; writing advances after each successful
+file save and shows the current JSON filename. The live display stays active through
+writing and replaces the scrolling saved-path list when stdout is a terminal.
+Redirected stdout still receives each saved path immediately, including with live
+progress on stderr; plain/verbose mode and `--no-progress` retain path output.
+These collection stages are specific to the backfill CLI; Python calls and
+`update` (including its full-history fallback) keep their existing output behavior.
 
 Python callers can collect without writing, write an existing report, or backfill:
 
@@ -557,6 +582,14 @@ After collecting monthly reports, generate a self-contained summary manifest off
 repo-history summarize --input-directory reports
 repo-history summarize --input-directory reports --output public/reports/manifest.json
 ```
+
+On interactive stderr, `summarize` shows a Rich progress bar for reading and
+validating the monthly reports, with status text while saving the manifest. The display
+includes report totals, elapsed time, approximate ETA, and the current filename.
+The output manifest path is printed to stdout after the display finishes.
+Redirected stderr and `--verbose` use throttled plain progress messages;
+`--no-progress` disables added progress, and `--quiet` suppresses progress and the
+saved path while retaining errors. Python manifest APIs remain silent by default.
 
 Publish the resulting `manifest.json` and the `repo-history-viz` bundle. The browser loads only the manifest. It contains monthly summaries, stable actor keys with classifications, and coverage metadata; full event records and actor profile fields remain in the monthly files. The generator validates every source report and atomically replaces the manifest. Rebuild explicitly after adding, replacing, or deleting reports; backfill and update remain independent. Do not modify source reports concurrently with generation.
 

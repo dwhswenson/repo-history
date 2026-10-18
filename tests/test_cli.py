@@ -206,3 +206,136 @@ def test_real_collector_missing_authentication(tmp_path, monkeypatch, capsys):
     assert run(tmp_path) == 1
     assert "GH_TOKEN" in capsys.readouterr().err
     assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize(
+    "flags,progress",
+    [
+        ([], True),
+        (["--verbose"], True),
+        (["--no-progress"], False),
+        (["--quiet"], False),
+    ],
+)
+def test_backfill_progress_modes(
+    tmp_path, collector, capsys, monkeypatch, flags, progress
+):
+    from repo_history._progress import enabled
+
+    actual = backfill_module._collect_history
+    active = []
+
+    def collect(*args, **kwargs):
+        active.append(enabled())
+        return actual(*args, **kwargs)
+
+    monkeypatch.setattr(backfill_module, "_collect_history", collect)
+    assert (
+        cli.main(
+            [
+                "backfill",
+                "o/r",
+                "--start",
+                "2024-02",
+                "--end",
+                "2024-02",
+                "--output-directory",
+                str(tmp_path),
+                *flags,
+            ]
+        )
+        == 0
+    )
+    out, err = capsys.readouterr()
+    assert active == [progress]
+    assert ("Backfill Preparing" in err) == progress
+    assert ("points spent" in err) == progress
+    assert "\x1b" not in err
+    assert out == ("" if "--quiet" in flags else str(tmp_path / "2024-02.json") + "\n")
+    assert not enabled()
+
+
+def test_update_fallback_has_no_progress(tmp_path, collector, monkeypatch, capsys):
+    from repo_history._progress import enabled
+
+    actual = backfill_module._collect_history
+    active = []
+
+    def collect(*args, **kwargs):
+        active.append(enabled())
+        return actual(*args, **kwargs)
+
+    monkeypatch.setattr(backfill_module, "_collect_history", collect)
+    assert cli.main(["update", "o/r", "--output-directory", str(tmp_path)]) == 0
+    assert active == [False]
+    assert "Backfill Preparing" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("flags", [[], ["--verbose"], ["--no-progress"]])
+def test_backfill_error_restores_progress_and_logging(
+    tmp_path, collector, monkeypatch, capsys, flags
+):
+    from repo_history._progress import enabled
+
+    def fail(*args, **kwargs):
+        raise AuthenticationError("missing token")
+
+    monkeypatch.setattr(backfill_module, "_collect_history", fail)
+    logger = logging.getLogger("repo_history")
+    original = logger.level, logger.propagate, logger.handlers[:]
+    assert (
+        cli.main(["backfill", "o/r", "--output-directory", str(tmp_path), *flags]) == 1
+    )
+    assert "missing token" in capsys.readouterr().err
+    assert (logger.level, logger.propagate, logger.handlers) == original
+    assert not enabled()
+
+
+@pytest.mark.parametrize(
+    "stdout_tty,stderr_tty,flags,paths_expected",
+    [
+        (True, True, [], False),
+        (False, True, [], True),
+        (True, False, [], True),
+        (True, True, ["--verbose"], True),
+        (True, True, ["--no-progress"], True),
+    ],
+)
+def test_live_writing_replaces_terminal_paths_but_preserves_pipelines(
+    tmp_path, collector, monkeypatch, stdout_tty, stderr_tty, flags, paths_expected
+):
+    import io
+
+    class Stream(io.StringIO):
+        def __init__(self, tty):
+            super().__init__()
+            self.tty = tty
+
+        def isatty(self):
+            return self.tty
+
+    stdout, stderr = Stream(stdout_tty), Stream(stderr_tty)
+    monkeypatch.setenv("TERM", "xterm-256color")
+    monkeypatch.setattr(cli.sys, "stdout", stdout)
+    monkeypatch.setattr(cli.sys, "stderr", stderr)
+    assert (
+        cli.main(
+            [
+                "backfill",
+                "o/r",
+                "--start",
+                "2024-02",
+                "--end",
+                "2024-02",
+                "--output-directory",
+                str(tmp_path),
+                *flags,
+            ]
+        )
+        == 0
+    )
+    expected = str(tmp_path / "2024-02.json") + "\n" if paths_expected else ""
+    assert stdout.getvalue() == expected
+    if stderr_tty and not flags:
+        assert "Writing" in stderr.getvalue()
+        assert "Saved 1 monthly reports" in stderr.getvalue()

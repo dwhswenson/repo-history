@@ -40,6 +40,8 @@ def test_shared_fixture_and_projection(mixed, empty):
 
 
 def test_sort_rename_and_determinism(tmp_path, mixed):
+    from repo_history._progress import listen
+
     second = later(mixed)
     second = replace(
         second,
@@ -58,7 +60,17 @@ def test_sort_rename_and_determinism(tmp_path, mixed):
     path = write_manifest(tmp_path)
     text = path.read_bytes()
     assert b"\n" not in text[:-1] and text.endswith(b"\n")
-    assert write_manifest(tmp_path).read_bytes() == text
+    events = []
+    with listen(events.append):
+        assert write_manifest(tmp_path).read_bytes() == text
+    assert [(e.stage, e.total) for e in events if e.kind == "total"] == [
+        ("Reports", 2),
+    ]
+    assert [e.stage for e in events if e.kind == "advance"] == [
+        "Reports",
+        "Reports",
+    ]
+    assert events[-1].kind == "finish"
     assert all(
         (tmp_path / name).read_bytes() == content for name, content in original.items()
     )
@@ -119,6 +131,8 @@ def test_classification_conflict(mixed):
 
 @pytest.mark.parametrize("stage", ["validation", "write", "flush", "replace"])
 def test_atomic_failures(tmp_path, mixed, monkeypatch, stage):
+    from repo_history._progress import listen
+
     (tmp_path / "2024-02.json").write_text(report_to_json(mixed))
     target = write_manifest(tmp_path)
     original = target.read_bytes()
@@ -163,10 +177,14 @@ def test_atomic_failures(tmp_path, mixed, monkeypatch, stage):
                 self.stream.close()
 
         monkeypatch.setattr(manifest.tempfile, "NamedTemporaryFile", BrokenWriter)
-    with pytest.raises((OSError, ReportValidationError)):
+    events = []
+    with listen(events.append), pytest.raises((OSError, ReportValidationError)):
         write_manifest(tmp_path)
     assert target.read_bytes() == original
     assert not list(tmp_path.glob("*.tmp"))
+    assert [e.stage for e in events if e.kind == "advance"] == ["Reports"]
+    assert not any(e.stage == "Writing" for e in events)
+    assert not any(e.kind == "finish" for e in events)
 
 
 def test_cli_offline_and_output(tmp_path, mixed, capsys, monkeypatch):
@@ -221,3 +239,74 @@ def test_manifest_validation_rejects_inconsistent_summaries(mixed, mutation):
     mutation(value)
     with pytest.raises(ReportValidationError):
         manifest.validate_manifest(value)
+
+
+@pytest.mark.parametrize(
+    "flags,progress",
+    [
+        ([], True),
+        (["--verbose"], True),
+        (["--no-progress"], False),
+        (["--quiet"], False),
+    ],
+)
+def test_cli_summary_progress_modes(tmp_path, mixed, capsys, flags, progress):
+    from repo_history._progress import enabled
+
+    (tmp_path / "2024-02.json").write_text(report_to_json(mixed))
+    assert main(["summarize", "--input-directory", str(tmp_path), *flags]) == 0
+    out, err = capsys.readouterr()
+    assert out == ("" if "--quiet" in flags else str(tmp_path / "manifest.json") + "\n")
+    assert ("Summarize Reports" in err) == progress
+    assert "Summarize Writing" not in err
+    assert ("Validating monthly reports in" in err) == ("--verbose" in flags)
+    assert "GraphQL" not in err
+    assert "\x1b" not in err
+    assert not enabled()
+
+
+def test_cli_summary_live_display_preserves_final_output(tmp_path, mixed, monkeypatch):
+    import io
+    import logging
+    import sys
+
+    from repo_history._progress import enabled
+
+    class TTY(io.StringIO):
+        def isatty(self):
+            return True
+
+    stdout, stderr = TTY(), TTY()
+    monkeypatch.setenv("TERM", "xterm-256color")
+    monkeypatch.setattr(sys, "stdout", stdout)
+    monkeypatch.setattr(sys, "stderr", stderr)
+    (tmp_path / "2024-02.json").write_text(report_to_json(mixed))
+    logger = logging.getLogger("repo_history")
+    original = logger.level, logger.propagate, logger.handlers[:]
+    assert main(["summarize", "--input-directory", str(tmp_path)]) == 0
+    assert stdout.getvalue() == str(tmp_path / "manifest.json") + "\n"
+    assert "Reports" in stderr.getvalue() and "Writing" not in stderr.getvalue()
+    assert "Saved manifest.json" in stderr.getvalue()
+    assert "GraphQL" not in stderr.getvalue()
+    assert (logger.level, logger.propagate, logger.handlers) == original
+    assert not enabled()
+
+
+@pytest.mark.parametrize("broken", [False, True])
+def test_summary_source_failure_does_not_complete_stage(tmp_path, mixed, broken):
+    import io
+
+    from repo_history._progress import enabled
+    from repo_history._terminal import SummarizeProgress
+
+    if broken:
+        (tmp_path / "2024-02.json").write_text(report_to_json(mixed))
+        (tmp_path / "2024-03.json").write_text("invalid")
+    display = SummarizeProgress(io.StringIO())
+    with pytest.raises(ReportWriteError), display:
+        write_manifest(tmp_path)
+    assert display.stages["Reports"].status == "failed"
+    assert display.stages["Reports"].completed == int(broken)
+    assert set(display.stages) == {"Reports"}
+    assert not (tmp_path / "manifest.json").exists()
+    assert not enabled()

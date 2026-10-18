@@ -3,6 +3,7 @@
 import re
 from datetime import datetime, timedelta, timezone
 
+from ._progress import emit
 from .collection import _actor, _field, _in_interval, _object, _string, _timestamp
 from .errors import GraphQLError, PaginationError
 from .identities import unresolved_git_actor
@@ -119,7 +120,9 @@ def collect_commits(client, repository, start, end, records):
         ("full", {}) if start is None and end is None else history_bounds(start, end)
     )
     if repository.default_branch_head is None:
+        emit("skipped", stage="Commits", detail="No default-branch commits")
         return strategy
+    emit("start", stage="Commits")
     resolved = {}
     history = client.iter_connection(
         COMMIT_HISTORY_QUERY,
@@ -134,6 +137,7 @@ def collect_commits(client, repository, start, end, records):
     for value in history:
         item = _object(value, OPERATION)
         sha = _sha(item, OPERATION)
+        emit("detail", detail=f"Commit {sha[:12]}")
         occurred = _timestamp(item, OPERATION, "committedDate")
         if not _in_interval(occurred, start, end):
             continue
@@ -190,4 +194,6 @@ def collect_commits(client, repository, start, end, records):
             tuple(actors),
             OPERATION,
         )
+        emit("advance", stage="Commits")
+    emit("complete", stage="Commits")
     return strategy

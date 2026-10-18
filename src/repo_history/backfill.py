@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
 
+from ._progress import emit
 from .collection import _month_bounds
 from .history import _collect_history, history_to_months
 from .writing import _check_directory, _write_report
@@ -65,7 +66,9 @@ def _run_backfill(
     _validate_request(owner, repo)
     now = _utc_now() if now is None else now
     end = _validate_optional_range(start, end, now)
+    emit("phase", stage="Preparing", detail="Validating destination")
     repository_id = _check_directory(Path(output_directory))
+    emit("phase", stage="Preparing", detail="Looking up repository")
     history = _collect_history(
         owner, repo, token=token, expected_repository_id=repository_id, started=now
     )
@@ -73,18 +76,32 @@ def _run_backfill(
     completed = False
     paths = []
     try:
+        emit(
+            "start", stage="Grouping", detail="Grouping and validating monthly reports"
+        )
         reports = history_to_months(history, start, end)
+        emit(
+            "complete",
+            stage="Grouping",
+            detail=f"Validated {len(reports)} monthly reports",
+        )
         # All selected reports have been validated before any replacement.
         LOG.info(
             "History grouped months=%s elapsed_seconds=%.3f",
             len(reports),
             perf_counter() - timer,
         )
+        emit("start", stage="Writing", detail=f"Writing {len(reports)} monthly reports")
+        emit("total", stage="Writing", total=len(reports))
         for report in reports:
+            emit("detail", detail=f"{report.metadata.month}.json")
             path = _write_report(report, output_directory)
             paths.append(path)
+            emit("advance", stage="Writing")
             if on_written is not None:
                 on_written(path)
+        emit("complete", stage="Writing", detail=f"Saved {len(paths)} monthly reports")
+        emit("finish", stage="Completed", detail=f"Saved {len(paths)} monthly reports")
         completed = True
         return paths
     finally:

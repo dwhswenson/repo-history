@@ -5,6 +5,7 @@ import re
 from dataclasses import replace
 from datetime import datetime, timezone
 
+from ._progress import emit
 from .discovery import BOUNDED_DISCOVERY_LIMITATION, discover_parents, select_strategy
 from .errors import GraphQLError
 from .models import (
@@ -259,6 +260,7 @@ def _collect_parent(
             (author,),
             operation,
         )
+    emit("detail", detail=f"{'Issue' if issues else 'PR'} #{subject.number}")
     with _parent_log_context("issue" if issues else "pr", subject.number):
         initial = parent if initial_pages else None
         _collect_timeline(

@@ -13,6 +13,7 @@ from typing import Any
 
 import requests
 
+from ._progress import Usage, emit, enabled
 from .authentication import resolve_token
 from .errors import (
     AuthenticationError,
@@ -38,6 +39,10 @@ def _parent_log_context(kind: str, number: int):
 
 
 def _log_embedded_page(operation: str, count: int, more: bool):
+    emit(
+        "request",
+        detail=f"{operation}{_PARENT_CONTEXT.get()} page=1 source=embedded nodes={count}",
+    )
     LOG.debug(
         "GitHub operation=%s%s page=1 source=embedded nodes=%s has_next_page=%s",
         operation,
@@ -166,6 +171,8 @@ class GraphQLClient:
         self._clock = time.time
         self._closed = False
         self._blocked = {}
+        self._progress_remaining = None
+        self._progress_reset = None
         self._api_usage = {"rest": _APIUsage(), "graphql": _APIUsage()}
 
     def close(self) -> None:
@@ -250,6 +257,7 @@ class GraphQLClient:
             self._api_usage["graphql"].unmeasured_attempts += 1
             self._api_usage["graphql"].attempts += 1
             self._api_usage["graphql"].retries += int(attempt > 1)
+            emit("request", detail=f"{operation_name}{log_context} attempt={attempt}")
             try:
                 response = self._session.post(
                     ENDPOINT,
@@ -289,6 +297,10 @@ class GraphQLClient:
                     reset = _reset(
                         headers.get("x-ratelimit-reset", rate.get("resetAt"))
                     )
+                    if remaining is not None:
+                        self._progress_remaining = remaining
+                    if reset is not None:
+                        self._progress_reset = reset
                     retry = _retry_after(headers.get("retry-after"), self._clock())
                     entries = errors if isinstance(errors, list) else []
                     kinds = set()
@@ -350,7 +362,8 @@ class GraphQLClient:
                         )
                     if status in (401, 403):
                         raise AuthenticationError(
-                            "GitHub authentication or permission denied", **diagnostic
+                            "GitHub authentication or permission denied",
+                            **diagnostic,
                         )
                     resource_failure = (
                         status in (502, 504)
@@ -421,13 +434,16 @@ class GraphQLClient:
                         else:
                             if not isinstance(data, dict):
                                 raise GraphQLError(
-                                    "missing or malformed GraphQL data", **diagnostic
+                                    "missing or malformed GraphQL data",
+                                    **diagnostic,
                                 )
                             if remaining == 0:
                                 self._blocked["graphql"] = (reset, None)
                             return data, values.get(page_size_variable)
                 finally:
                     response.close()
+            finally:
+                self._publish_usage()
             if resource_failure and page_size_variable is not None:
                 size = values[page_size_variable]
                 if size == 1:
@@ -449,8 +465,28 @@ class GraphQLClient:
                 2 ** (attempt - 1),
                 attempt,
             )
+            emit(
+                "retry",
+                detail=f"{operation_name}{log_context}: retry in {2 ** (attempt - 1)}s after attempt {attempt}",
+            )
             self._sleep(2 ** (attempt - 1))
         raise AssertionError("unreachable")
+
+    def _publish_usage(self):
+        if not enabled():
+            return
+        usage = self._api_usage["graphql"]
+        emit(
+            "usage",
+            usage=Usage(
+                points=usage.points,
+                attempts=usage.attempts,
+                retries=usage.retries,
+                unmeasured=usage.unmeasured_attempts,
+                remaining=self._progress_remaining,
+                reset=self._progress_reset,
+            ),
+        )
 
     def _check_budget(self, resource, operation):
         for key in ("secondary", resource):

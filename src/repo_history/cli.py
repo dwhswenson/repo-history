@@ -3,6 +3,7 @@
 import argparse
 import logging
 import sys
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -32,6 +33,14 @@ def _verbosity(parser):
     )
     verbosity.add_argument(
         "--verbose", action="store_true", help="include debug diagnostics"
+    )
+
+
+def _progress_option(parser):
+    parser.add_argument(
+        "--no-progress",
+        action="store_true",
+        help="disable added progress output; retain ordinary logs",
     )
 
 
@@ -67,6 +76,8 @@ def _parser() -> argparse.ArgumentParser:
             "--end", metavar="YYYY-MM", help="default: current UTC month"
         )
         command.add_argument("--output-directory", required=True, type=Path)
+        if backfilling:
+            _progress_option(command)
         _verbosity(command)
     summary = commands.add_parser(
         "summarize",
@@ -77,6 +88,7 @@ def _parser() -> argparse.ArgumentParser:
     summary.add_argument(
         "--output", type=Path, help="default: INPUT_DIRECTORY/manifest.json"
     )
+    _progress_option(summary)
     _verbosity(summary)
     return parser
 
@@ -97,7 +109,19 @@ def main(argv: list[str] | None = None) -> int:
         logging.ERROR if args.quiet else logging.DEBUG if args.verbose else logging.INFO
     )
     logger = logging.getLogger("repo_history")
-    handler = logging.StreamHandler(sys.stderr)
+    progress = None
+    if (
+        args.command in {"backfill", "summarize"}
+        and not args.quiet
+        and not args.no_progress
+    ):
+        from ._terminal import BackfillProgress, SummarizeProgress
+
+        display = BackfillProgress if args.command == "backfill" else SummarizeProgress
+        progress = display(sys.stderr, verbose=args.verbose)
+    handler = (
+        progress.log_handler() if progress is not None else None
+    ) or logging.StreamHandler(sys.stderr)
     handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
     previous_level, previous_propagate = logger.level, logger.propagate
     logger.addHandler(handler)
@@ -105,22 +129,31 @@ def main(argv: list[str] | None = None) -> int:
     logger.propagate = False
 
     def saved(path: Path) -> None:
-        if not args.quiet:
+        live_paths = (
+            args.command == "backfill"
+            and progress is not None
+            and progress.interactive
+            and sys.stdout.isatty()
+        )
+        if not args.quiet and not live_paths:
             print(path, flush=True)
 
     try:
         if args.command == "summarize":
-            LOG.debug("Validating monthly reports in %s", args.input_directory)
-            saved(write_manifest(args.input_directory, output_path=args.output))
+            with progress if progress is not None else nullcontext():
+                LOG.debug("Validating monthly reports in %s", args.input_directory)
+                path = write_manifest(args.input_directory, output_path=args.output)
+            saved(path)
         elif args.command == "backfill":
-            _run_backfill(
-                *args.repository,
-                args.start,
-                args.end,
-                output_directory=args.output_directory,
-                on_written=saved,
-                now=now,
-            )
+            with progress if progress is not None else nullcontext():
+                _run_backfill(
+                    *args.repository,
+                    args.start,
+                    args.end,
+                    output_directory=args.output_directory,
+                    on_written=saved,
+                    now=now,
+                )
         else:
             start, repository_id = _prepare_update(args.output_directory, args.start)
             try:
