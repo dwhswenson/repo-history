@@ -75,7 +75,7 @@ Define a versioned Draft 2020-12 JSON Schema, distributed with the Python packag
 
 Each file contains:
 
-- **Metadata:** schema version, repository node ID, current name and URL, month boundaries, collection interval, ongoing-month flag, captured default-branch head, commit-history strategy, and coverage limitations.
+- **Metadata:** schema version, repository node ID, current name and URL, month boundaries, collection interval, ongoing-month flag, captured default-branch head, parent-discovery and commit-history strategies, and coverage limitations. Strategy fields are optional; absence means unknown. Collections record the actual selected strategies, including pre-traversal fallbacks, and bounded parent discovery includes an experimental completeness warning.
 - **Actors:** stable identity keys, available GitHub IDs and logins, display metadata, and actor classification.
 - **Activities:** stable event ID, type, occurrence timestamp, URL where available, subject reference, credited actors and roles, and activity-specific metadata.
 - **Monthly summaries:** repository counts by activity type, per-actor counts by activity type, distinct actor counts by population, and unattributed-event counts.

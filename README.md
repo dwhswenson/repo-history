@@ -281,11 +281,16 @@ GraphQL collection. See [repository issues endpoint permissions](https://docs.gi
 
 Bounded mode validates the retrieved discovery records and retained parents'
 histories; it cannot detect malformed unrelated history on excluded parents.
-The report schema and activity rules are unchanged. Unknown discovery modes
+The activity rules are unchanged. Unknown discovery modes
 raise `ValueError` before requests. A failure never switches strategies or
 returns a partial report. For January of year 1 only, bounded mode selects full
 traversal before discovery to avoid overlap underflow and logs that selection.
-The selected strategy is logged at INFO rather than added to report metadata.
+Reports record the actual selected strategy in `metadata.parent_discovery`
+(`bounded` or `full`), independently of `metadata.commit_history`. The selected
+strategy is also logged at INFO. Bounded reports include an explicit completeness
+warning in `metadata.coverage_limitations`. An absent optional
+`parent_discovery` field means the strategy is unknown (Python `None`)
+and is omitted on serialization. The January year-1 fallback records `full`.
 Bounded discovery is now the default by user preference; its completeness
 assumptions remain unverified. Instrumentation, comparison tooling, and live
 verification remain follow-on work described in `PERFORMANCE.md`.
@@ -472,6 +477,9 @@ nulls remain representable. Schema versioning is independent of package versioni
 
 Metadata records repository node ID/current name/URL, UTC month boundaries,
 collection interval, ongoing flag, captured branch/head, and coverage limitations.
+Optional `parent_discovery` and `commit_history` fields record the actual strategies
+used for issue/PR parent discovery and commit traversal, respectively. Missing
+strategy fields mean unknown, not a presumed default.
 The ongoing flag and future-month rejection use collection start rather than the
 reader's clock. Null branch/head denotes an empty repository. Event occurrence
 must lie in `[month_start, month_end)`; contextual timestamps may be outside it.

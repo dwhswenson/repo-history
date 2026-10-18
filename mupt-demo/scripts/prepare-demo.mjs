@@ -23,7 +23,7 @@ await Promise.all([
     join(output, "repo-history-viz.js"),
   ),
 ]);
-execFileSync("pixi", ["run", "-e", "dev", "python", "-m", "repo_history", "manifest", "--input-directory", source, "--output", join(destination, "manifest.json")], {
+execFileSync("pixi", ["run", "-e", "dev", "python", "-m", "repo_history", "summarize", "--input-directory", source, "--output", join(destination, "manifest.json")], {
   cwd: fileURLToPath(new URL("../../", import.meta.url)), stdio: "inherit"
 });
 // Keep the published report data limited to the summary manifest.

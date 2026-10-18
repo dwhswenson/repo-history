@@ -223,7 +223,9 @@ after the requested month. Exercise malformed responses, pagination loops,
 rate limits, missing hydration results, and transport failures.
 
 For valid source data, compare the complete normalized reports after excluding
-only collection start/finish timestamps. Hold repository identity, captured
+collection start/finish timestamps and the expected differences in parent-discovery
+provenance and its bounded-discovery coverage warning. Check those provenance
+differences separately. Hold repository identity, captured
 head, and collection-start time constant in fixtures. Require equality of:
 
 - Activity IDs, kinds, occurrence times, credits, subject context, and metadata.
