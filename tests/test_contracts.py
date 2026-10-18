@@ -335,8 +335,8 @@ def test_state_contract_accepts_future_incremental_progress(session, tmp_path):
 
 
 def test_inactive_repository_baseline_uses_creation_month(session, tmp_path):
+    from .github import connection
     from .helpers import repository
-    from .test_collection import connection
 
     session.repository = repository(
         createdAt="2024-03-01T00:00:00Z",

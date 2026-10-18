@@ -1,4 +1,4 @@
-"""One full repository traversal and network-free monthly projection."""
+"""Shared full-history and update collection, with offline monthly projection."""
 
 import logging
 from collections import defaultdict
@@ -58,7 +58,6 @@ def _collect_snapshot(
     started=None,
     start=None,
     end=None,
-    discovery="full",
 ):
     """Collect one interval (or full history) with actual strategy provenance."""
     if any(
@@ -82,7 +81,7 @@ def _collect_snapshot(
                     "missing repository creation timestamp",
                     operation="RepositoryLookup",
                 )
-            discovery = select_strategy(start, discovery)
+            discovery = select_strategy(start, "full" if start is None else "bounded")
             records = _Records()
             for issues, parent, operation in discover_parents(
                 client,
@@ -90,7 +89,6 @@ def _collect_snapshot(
                 start,
                 end,
                 strategy=discovery,
-                include_activity=True,
             ):
                 _collect_parent(
                     client,
@@ -100,7 +98,6 @@ def _collect_snapshot(
                     end,
                     records,
                     issues=issues,
-                    initial_pages=True,
                 )
             commit_strategy = collect_commits(client, repository, start, end, records)
             limitations = COVERAGE_LIMITATIONS

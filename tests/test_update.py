@@ -11,9 +11,8 @@ import repo_history as api
 from repo_history import cli, history, update
 
 from . import test_history
+from .github import comment, connection, hydrated, inline, parent, rest_parent, thread
 from .helpers import Response, replace, repository
-from .test_collection import comment, connection, inline, parent, thread
-from .test_discovery import hydrated, rest_parent
 from .test_history import NOW
 
 history_session = test_history.session
@@ -33,6 +32,9 @@ ACTIVITY_CONNECTIONS = {
 def session(history_session, monkeypatch):
     """Replay REST discovery and hydration against the shared lifecycle history."""
     result = history_session
+    result.pages[("RepositoryPullRequests", "R_example", None)].body["data"]["node"][
+        "pullRequests"
+    ]["nodes"][0]["number"] = 2
     post = result.post
 
     def parents():
@@ -217,20 +219,19 @@ def test_identity_checked_before_traversal(session, tmp_path, empty):
     assert len(session.calls) == 1
 
 
-def test_range_matches_independent_months(session, tmp_path):
+def test_range_matches_full_history_projection(session, tmp_path):
     assert run(tmp_path, "--start", "2024-01", "--end", "2024-04") == 0
+    snapshot = api.collect_history("o", "r", token="test")
     for month in range(1, 5):
         grouped = api.report_from_json(
             (tmp_path / f"2024-{month:02d}.json").read_text()
         )
-        monthly = api.collect_month("o", "r", 2024, month)
+        monthly = api.history_to_months(
+            snapshot, f"2024-{month:02d}", f"2024-{month:02d}"
+        )[0]
         assert grouped.activities == monthly.activities
         assert grouped.actors == monthly.actors
         assert grouped.summaries == monthly.summaries
-        assert (
-            grouped.metadata.coverage.limitations
-            == monthly.metadata.coverage.limitations
-        )
         assert grouped.metadata.provenance.last_updated_by.parent_discovery == "bounded"
         assert grouped.metadata.provenance.last_updated_by.commit_history == "bounded"
 
@@ -286,14 +287,12 @@ def test_destination_validated_once(session, tmp_path, empty, monkeypatch):
 
 
 @pytest.mark.parametrize("enabled", [False, True])
-def test_bounded_range_one_discovery_and_monthly_equivalence(
-    tmp_path, monkeypatch, enabled
-):
+def test_bounded_range_collects_once_and_groups_months(tmp_path, monkeypatch, enabled):
+    from .github import commit, page
+    from .github import history as commit_history
     from .helpers import Session
-    from .test_commits import commit, page
-    from .test_commits import history as commit_history
 
-    def make_session(*, include_activity=False):
+    def make_session():
         result = Session()
         item = parent("P", __typename="PullRequest", date="2024-02-01T00:00:00Z")
         activity_pages = [
@@ -302,14 +301,12 @@ def test_bounded_range_one_discovery_and_monthly_equivalence(
             connection("reviews"),
             connection("reviewThreads"),
         ]
-        if include_activity:
-            for response in activity_pages:
-                item.update(response.body["data"]["node"])
+        for response in activity_pages:
+            item.update(response.body["data"]["node"])
         result.responses = [
             repository(createdAt="2024-01-01T00:00:00Z", hasIssuesEnabled=enabled),
             Response([rest_parent(pr=True, updated_at="2024-09-01T00:00:00Z")]),
             hydrated(item),
-            *(activity_pages if not include_activity else []),
             commit_history(
                 [
                     commit(
@@ -324,10 +321,9 @@ def test_bounded_range_one_discovery_and_monthly_equivalence(
         ]
         return result
 
-    result = make_session(include_activity=True)
+    result = make_session()
     monkeypatch.setattr("requests.Session", lambda: result)
     monkeypatch.setattr(history, "_utc_now", lambda: NOW)
-    monkeypatch.setattr("repo_history.collection._utc_now", lambda: NOW)
     assert run(tmp_path, "--start", "2024-02", "--end", "2024-03") == 0
     rest = [(url, kw) for url, kw in result.calls if "json" not in kw]
     assert len(rest) == 1
@@ -339,25 +335,20 @@ def test_bounded_range_one_discovery_and_monthly_equivalence(
         )
         == 1
     )
-    for month in (2, 3):
-        result = make_session()
+    for month, expected in (
+        (2, {"pr_opened", "commit"}),
+        (3, {"pr_conversation_comment"}),
+    ):
         grouped = api.report_from_json(
             (tmp_path / f"2024-{month:02d}.json").read_text()
         )
-        monthly = api.collect_month("o", "r", 2024, month)
-        assert grouped.activities == monthly.activities
-        assert grouped.actors == monthly.actors
-        assert grouped.summaries == monthly.summaries
-        assert (
-            grouped.metadata.coverage.limitations
-            == monthly.metadata.coverage.limitations
-        )
-        assert (
-            grouped.metadata.provenance.last_updated_by.parent_discovery
-            == grouped.metadata.provenance.last_updated_by.commit_history
-            == "bounded"
-        )
+        assert {a.type for a in grouped.activities} == expected
+        assert grouped.summaries.repository_counts["commit"] == (1 if month == 2 else 0)
+        assert grouped.metadata.provenance.last_updated_by.parent_discovery == "bounded"
+        assert grouped.metadata.provenance.last_updated_by.commit_history == "bounded"
         assert any("Experimental" in x for x in grouped.metadata.coverage.limitations)
+    assert len(result.calls) == 4
+    assert not result.responses
 
 
 def test_range_strategy_fallbacks_record_actual_provenance(session, tmp_path):
@@ -397,7 +388,7 @@ def test_range_empty_repository(session, tmp_path, enabled):
 
 
 @pytest.mark.parametrize("paginated", [False, True])
-def test_embedded_update_request_measurement(session, tmp_path, paginated):
+def test_embedded_update_request_budget(session, tmp_path, paginated):
     if not paginated:
         # Same source history, with each activity connection fitting in one page.
         for (operation, node_id, after), response in list(session.pages.items()):
@@ -431,32 +422,17 @@ def test_embedded_update_request_measurement(session, tmp_path, paginated):
         }
     else:
         assert not nested
-    session.calls.clear()
-    reference = api.collect_month("o", "r", 2024, 2, token="test")
-    assert optimized.activities == reference.activities
-    assert optimized.actors == reference.actors
-    assert optimized.summaries == reference.summaries
+    assert len(optimized_calls) == (11 if paginated else 6)
+    assert sum("json" not in kw for _, kw in optimized_calls) == 1
     assert (
-        optimized.metadata.coverage.limitations
-        == reference.metadata.coverage.limitations
-    )
-    assert len(session.calls) - len(optimized_calls) == 7  # 2/issue + 4/PR + 1/thread
-    assert (len(optimized_calls), len(session.calls)) == (
-        (11, 18) if paginated else (6, 13)
-    )
-    for calls in (optimized_calls, session.calls):
-        assert sum("json" not in kw for _, kw in calls) == 1
-        assert (
-            sum(
-                kw.get("json", {}).get("operationName") == "HydrateRepositoryParents"
-                for _, kw in calls
-            )
-            == 1
+        sum(
+            p["operationName"] == "HydrateRepositoryParents" for p in optimized_payloads
         )
-    print(
-        f"bounded fixture paginated={paginated}: embedded update "
-        f"{len(optimized_calls)} requests; metadata-only reference {len(session.calls)}"
+        == 1
     )
+    assert set(optimized.summaries.repository_counts) == set(api.ACTIVITY_TYPES)
+    assert optimized.summaries.repository_counts["pr_review"] == 1
+    assert optimized.summaries.repository_counts["pr_inline_review_comment"] == 2
 
 
 def test_update_all_activity_overflows_and_later_thread_comments(session, tmp_path):
@@ -511,9 +487,12 @@ def test_update_all_activity_overflows_and_later_thread_comments(session, tmp_pa
         if p["operationName"] == "ReviewThreadComments"
         and p["variables"]["id"] == "T_later"
     } == {"later-comments", "last-comments"}
+    snapshot = api.collect_history("o", "r", token="test")
     for month in (1, 2, 3):
         actual = api.report_from_json((tmp_path / f"2024-{month:02d}.json").read_text())
-        reference = api.collect_month("o", "r", 2024, month, token="test")
+        reference = api.history_to_months(
+            snapshot, f"2024-{month:02d}", f"2024-{month:02d}"
+        )[0]
         assert actual.activities == reference.activities
         assert actual.actors == reference.actors
         assert actual.summaries == reference.summaries

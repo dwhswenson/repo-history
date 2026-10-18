@@ -6,47 +6,24 @@ from datetime import datetime, timezone
 import pytest
 
 import repo_history as api
-from repo_history import collection
+from repo_history import history as collection
 from repo_history.commits import history_bounds
 from repo_history.identities import git_identity_key
 
+from .github import (
+    NOW,
+    actor,
+    collect_update_report,
+    commit,
+    connection,
+    history,
+    hydrated,
+    identity,
+    page,
+    parent,
+    rest_parent,
+)
 from .helpers import Response, Session, errors, replace, repository
-from .test_collection import NOW, actor, connection, parent
-
-
-def page(nodes=(), *, more=False, cursor=None):
-    return {
-        "nodes": list(nodes),
-        "pageInfo": {"hasNextPage": more, "endCursor": cursor},
-    }
-
-
-def identity(name="Author", email="author@example.org", user=None):
-    return {"name": name, "email": email, "user": user}
-
-
-def commit(sha="b", *, date="2024-02-10T00:00:00Z", **updates):
-    author = identity(user=actor())
-    value = {
-        "id": f"C_{sha}",
-        "oid": sha * 40,
-        "url": f"https://github.com/o/r/commit/{sha * 40}",
-        "messageHeadline": "A commit headline",
-        "authoredDate": "2024-01-15T00:00:00Z",
-        "committedDate": date,
-        "author": author,
-        "committer": identity(
-            "Committer", "committer@example.org", actor("U_committer")
-        ),
-        "authors": page([author]),
-        "parents": page(),
-    }
-    value.update(updates)
-    return value
-
-
-def history(nodes=(), **kwargs):
-    return Response({"data": {"node": {"object": {"history": page(nodes, **kwargs)}}}})
 
 
 @pytest.fixture
@@ -74,15 +51,13 @@ def session(monkeypatch):
     return result
 
 
-def collect(session, responses, *, discovery="full", year=2024, month=2):
+def collect(session, responses, *, year=2024, month=2):
     session.responses = [
         repository(),
-        connection("pullRequests") if discovery == "full" else Response([]),
+        connection("pullRequests") if (year, month) == (1, 1) else Response([]),
         *responses,
     ]
-    result = api.collect_month(
-        "old-owner", "old-name", year, month, token="test", discovery=discovery
-    )
+    result = collect_update_report("old-owner", "old-name", year, month, token="test")
     assert session.closed and not session.responses
     return result
 
@@ -95,9 +70,8 @@ def payloads(session, operation="CommitHistory"):
     ]
 
 
-@pytest.mark.parametrize("discovery", ["full", "bounded"])
-def test_buffered_history_is_independent_of_parent_discovery(session, discovery):
-    report = collect(session, [history([commit()])], discovery=discovery)
+def test_update_uses_buffered_history(session):
+    report = collect(session, [history([commit()])])
     request = payloads(session)[0]
     assert request["variables"] == {
         "id": "R_example",
@@ -218,9 +192,9 @@ def test_null_primary_and_bot_looking_unlinked_identity(session):
 def test_empty_repository_skips_history(session):
     session.responses = [
         repository(isEmpty=True, defaultBranchRef=None),
-        connection("pullRequests"),
+        Response([]),
     ]
-    report = api.collect_month("o", "r", 2024, 2, token="test", discovery="full")
+    report = collect_update_report("o", "r", 2024, 2, token="test")
     assert not payloads(session)
     assert report.summaries.repository_counts["commit"] == 0
     assert report.metadata.provenance.last_updated_by.commit_history == "bounded"
@@ -356,24 +330,23 @@ def test_small_inversion_is_recovered_and_large_inversion_is_disclosed(session):
 
 
 def test_combined_pr_and_commit_counts_and_api_cost(session, caplog):
-    caplog.set_level("INFO", logger="repo_history.collection")
+    caplog.set_level("INFO", logger="repo_history.history")
     responses = [
         repository(),
-        connection("pullRequests", [parent(date="2024-02-02T00:00:00Z")]),
-        connection("timelineItems"),
-        connection("comments"),
-        connection("reviews"),
-        connection("reviewThreads"),
+        Response([rest_parent(pr=True)]),
+        hydrated(parent(date="2024-02-02T00:00:00Z", __typename="PullRequest")),
         history([commit()]),
     ]
     for response in responses:
+        if not isinstance(response.body, dict):
+            continue
         response.body["data"]["rateLimit"] = {"cost": 2}
     session.responses = responses
-    report = api.collect_month("o", "r", 2024, 2, token="test", discovery="full")
+    report = collect_update_report("o", "r", 2024, 2, token="test")
     assert report.summaries.repository_counts["pr_opened"] == 1
     assert report.summaries.repository_counts["commit"] == 1
     assert report.summaries.distinct_actors.total == 1
-    assert "GraphQL points=16 unmeasured_attempts=0" in caplog.text
+    assert "GraphQL requests=4 retries=0 points=8 unmeasured_attempts=0" in caplog.text
 
 
 @pytest.mark.parametrize("strategy", ["unknown", True, 0])
@@ -403,19 +376,20 @@ def test_commit_user_projection_of_bot_preserves_canonical_identity(
     value = commit(author=projected, authors=page([projected]), committer=projected)
     pr_responses = (
         [
-            connection(
-                "pullRequests", [parent(author=canonical, date="2024-02-02T00:00:00Z")]
+            Response([rest_parent(pr=True)]),
+            hydrated(
+                parent(
+                    author=canonical,
+                    date="2024-02-02T00:00:00Z",
+                    __typename="PullRequest",
+                )
             ),
-            connection("timelineItems"),
-            connection("comments"),
-            connection("reviews"),
-            connection("reviewThreads"),
         ]
         if seen_in_pr
-        else [connection("pullRequests")]
+        else [Response([])]
     )
     session.responses = [repository(), *pr_responses, history([value, deepcopy(value)])]
-    report = api.collect_month("o", "r", 2024, 2, token="test", discovery="full")
+    report = collect_update_report("o", "r", 2024, 2, token="test")
     registered = next(a for a in report.actors if a.key == key)
     assert registered.classification == "bot"
     assert registered.login == "copilot-pull-request-reviewer"

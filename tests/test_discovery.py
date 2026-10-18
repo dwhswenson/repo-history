@@ -7,34 +7,36 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 
 import repo_history as api
-from repo_history import collection
+from repo_history import history as collection
+from repo_history.commits import BOUNDED_LIMITATION
 from repo_history.discovery import BOUNDED_DISCOVERY_LIMITATION
 from repo_history.queries import parent_hydration_query
 
+from .github import (
+    actor,
+    collect_update_report,
+    comment,
+    connection,
+    event,
+    hydrated,
+    inline,
+    parent,
+    rest_parent,
+    review,
+    thread,
+)
 from .helpers import (
     Response,
     Session,
     empty_commits,
     errors,
-    replace,
     repository,
-    without_run_ids,
-)
-from .test_collection import (
-    actor,
-    comment,
-    connection,
-    event,
-    inline,
-    parent,
-    review,
-    thread,
 )
 
 
 @pytest.fixture(autouse=True)
 def isolate_commits(monkeypatch):
-    monkeypatch.setattr("repo_history.commits.collect_commits", empty_commits)
+    monkeypatch.setattr("repo_history.history.collect_commits", empty_commits)
 
 
 NOW = datetime(2024, 4, 15, tzinfo=timezone.utc)
@@ -48,42 +50,14 @@ def session(monkeypatch):
     return result
 
 
-def rest_parent(number=1, *, pr=False, **updates):
-    result = {
-        "number": number,
-        "node_id": "REST_ISSUE_ID_NOT_PR_ID",
-        "created_at": "2024-01-01T00:00:00Z",
-        "updated_at": "2024-02-10T00:00:00Z",
-    }
-    if pr:
-        result["pull_request"] = {
-            "url": f"https://api.github.com/repos/o/r/pulls/{number}"
-        }
-    result.update(updates)
-    return result
-
-
-def hydrated(*parents):
-    return Response(
-        {"data": {"node": {f"parent{i}": p for i, p in enumerate(parents)}}}
-    )
-
-
 def bounded(session, responses, **kwargs):
     session.responses = responses
-    result = api.collect_month(
-        "old-owner", "old-name", 2024, 2, token="test", discovery="bounded", **kwargs
+    result = collect_update_report(
+        "old-owner", "old-name", 2024, 2, token="test", **kwargs
     )
     assert not session.responses
     assert session.closed
     return result
-
-
-@pytest.mark.parametrize("strategy", [None, "", "unknown", True, [], {}])
-def test_invalid_strategy_does_not_make_requests(session, strategy):
-    with pytest.raises(ValueError, match="discovery"):
-        api.collect_month("o", "r", 2024, 2, discovery=strategy)
-    assert not session.calls
 
 
 def test_resolved_name_all_states_overlap_and_pr_identity(session):
@@ -95,10 +69,6 @@ def test_resolved_name_all_states_overlap_and_pr_identity(session):
             hydrated(
                 parent("P_real", __typename="PullRequest", date="2024-02-01T00:00:00Z")
             ),
-            connection("timelineItems"),
-            connection("comments"),
-            connection("reviews"),
-            connection("reviewThreads"),
         ],
     )
     url, request = session.calls[1]
@@ -150,11 +120,6 @@ def test_unordered_pages_bounds_and_duplicate_updated_times(session):
                     for n in (2, 4, 5, 1)
                 ]
             ),
-            *[
-                response
-                for _ in range(4)
-                for response in (connection("timelineItems"), connection("comments"))
-            ],
         ],
     )
     assert len(report.activities) == 4
@@ -188,7 +153,7 @@ def test_unordered_pages_bounds_and_duplicate_updated_times(session):
 def test_invalid_rest_records_fail_and_close(session, changes):
     session.responses = [repository(), Response([rest_parent(**changes)])]
     with pytest.raises(api.TransportError):
-        api.collect_month("o", "r", 2024, 2, token="test", discovery="bounded")
+        collect_update_report("o", "r", 2024, 2, token="test")
     assert session.closed
     assert len(session.calls) == 2
 
@@ -199,7 +164,7 @@ def test_missing_rest_field_fails(session, field):
     del item[field]
     session.responses = [repository(), Response([item])]
     with pytest.raises(api.TransportError):
-        api.collect_month("o", "r", 2024, 2, token="test", discovery="bounded")
+        collect_update_report("o", "r", 2024, 2, token="test")
     assert session.closed
 
 
@@ -209,7 +174,7 @@ def test_missing_rest_field_fails(session, field):
 def test_conflicting_discovery_identity_fails(session, duplicate):
     session.responses = [repository(), Response([rest_parent(), duplicate])]
     with pytest.raises(api.TransportError, match="conflicting"):
-        api.collect_month("o", "r", 2024, 2, token="test", discovery="bounded")
+        collect_update_report("o", "r", 2024, 2, token="test")
     assert session.closed
 
 
@@ -226,7 +191,7 @@ def test_conflicting_discovery_identity_fails(session, duplicate):
 def test_missing_or_mismatched_hydration_fails(session, item):
     session.responses = [repository(), Response([rest_parent(pr=True)]), hydrated(item)]
     with pytest.raises(api.GraphQLError):
-        api.collect_month("o", "r", 2024, 2, token="test", discovery="bounded")
+        collect_update_report("o", "r", 2024, 2, token="test")
     assert session.closed
     assert len(session.calls) == 3
 
@@ -239,7 +204,7 @@ def test_missing_hydration_repository_or_alias_fails(session, data):
         Response({"data": data}),
     ]
     with pytest.raises(api.GraphQLError):
-        api.collect_month("o", "r", 2024, 2, token="test", discovery="bounded")
+        collect_update_report("o", "r", 2024, 2, token="test")
     assert session.closed
 
 
@@ -252,38 +217,28 @@ def test_subject_validation_is_shared(session):
         hydrated(invalid),
     ]
     with pytest.raises(api.GraphQLError, match="author"):
-        api.collect_month("o", "r", 2024, 2, token="test", discovery="bounded")
+        collect_update_report("o", "r", 2024, 2, token="test")
     assert session.closed
 
 
 def test_hydration_batches_and_late_failure_never_switch_strategy(session):
     parents = [
-        parent(f"P_{n}", number=n, __typename="PullRequest") for n in range(1, 52)
+        parent(f"P_{n}", number=n, __typename="PullRequest") for n in range(1, 22)
     ]
     session.responses = [
         repository(),
-        Response([rest_parent(n, pr=True) for n in range(1, 52)]),
-        hydrated(*parents[:50]),
+        Response([rest_parent(n, pr=True) for n in range(1, 22)]),
+        hydrated(*parents[:20]),
+        errors("FORBIDDEN"),
     ]
-    session.responses += [
-        r
-        for _ in range(50)
-        for r in (
-            connection("timelineItems"),
-            connection("comments"),
-            connection("reviews"),
-            connection("reviewThreads"),
-        )
-    ]
-    session.responses.append(errors("FORBIDDEN"))
     with pytest.raises(api.GraphQLError):
-        api.collect_month("o", "r", 2024, 2, token="test", discovery="bounded")
+        collect_update_report()
     payloads = [kwargs["json"] for _, kwargs in session.calls if "json" in kwargs]
     hydration = [
         p for p in payloads if p["operationName"] == "HydrateRepositoryParents"
     ]
-    assert [len(p["variables"]) for p in hydration] == [51, 2]
-    assert hydration[-1]["variables"] == {"id": "R_example", "number0": 51}
+    assert [len(p["variables"]) for p in hydration] == [21, 2]
+    assert hydration[-1]["variables"] == {"id": "R_example", "number0": 21}
     assert not any(
         p["operationName"] in ("RepositoryIssues", "RepositoryPullRequests")
         for p in payloads
@@ -299,7 +254,7 @@ def test_disabled_issue_endpoint_or_hydration_failure_is_not_empty(session, fail
         else [repository(), Response([rest_parent(pr=True)]), failure]
     )
     with pytest.raises(api.GitHubAPIError):
-        api.collect_month("o", "r", 2024, 2, token="test", discovery="bounded")
+        collect_update_report("o", "r", 2024, 2, token="test")
     assert session.closed
 
 
@@ -311,7 +266,7 @@ def test_late_rest_failure_does_not_hydrate_or_fallback(session):
         Response(status=404),
     ]
     with pytest.raises(api.TransportError):
-        api.collect_month("o", "r", 2024, 2, token="test", discovery="bounded")
+        collect_update_report("o", "r", 2024, 2, token="test")
     assert session.closed
     assert len(session.calls) == 3
 
@@ -319,7 +274,7 @@ def test_late_rest_failure_does_not_hydrate_or_fallback(session):
 def test_earliest_month_selects_full_before_discovery(session, caplog):
     caplog.set_level("INFO", logger="repo_history.discovery")
     session.responses = [repository(), connection("pullRequests")]
-    report = api.collect_month("o", "r", 1, 1, token="test", discovery="bounded")
+    report = collect_update_report("o", "r", 1, 1, token="test")
     assert report.metadata.month == "0001-01"
     assert report.metadata.provenance.last_updated_by.parent_discovery == "full"
     assert BOUNDED_DISCOVERY_LIMITATION not in report.metadata.coverage.limitations
@@ -332,13 +287,13 @@ def test_earliest_month_selects_full_before_discovery(session, caplog):
 
 def test_early_year_overlap_is_zero_padded(session):
     session.responses = [repository(), Response([])]
-    api.collect_month("o", "r", 1, 2, token="test", discovery="bounded")
+    collect_update_report("o", "r", 1, 2, token="test")
     assert parse_qs(urlsplit(session.calls[1][0]).query)["since"] == [
         "0001-01-31T23:59:59Z"
     ]
 
 
-@pytest.mark.parametrize("count", [1, 50])
+@pytest.mark.parametrize("count", [1, 20])
 def test_hydration_queries_reuse_fragments_and_variables(count):
     query = parent_hydration_query(count)
     assert query.count("fragment LifecycleActor") == 1
@@ -351,34 +306,24 @@ def test_hydration_queries_reuse_fragments_and_variables(count):
     assert "body" not in query
 
 
-@pytest.mark.parametrize("count", [0, 51, True, "1"])
+@pytest.mark.parametrize("count", [0, 21, True, "1"])
 def test_invalid_hydration_batch_size(count):
     with pytest.raises(ValueError):
         parent_hydration_query(count)
 
 
 @pytest.mark.parametrize("kind", ["issues", "prs", "mixed"])
-@pytest.mark.parametrize(
-    "include_activity,count,sizes", [(True, 41, [20, 20, 1]), (False, 51, [50, 1])]
-)
-def test_discovery_hydration_batch_limits(
-    session, kind, include_activity, count, sizes
-):
+def test_discovery_hydration_batch_limits(session, kind):
     from repo_history.discovery import discover_parents
     from repo_history.repository import lookup_repository
 
+    count, sizes = 41, [20, 20, 1]
     parents, rest = [], []
     for number in range(1, count + 1):
         pr = kind == "prs" or (kind == "mixed" and number % 2 == 0)
         item = parent(
             f"P_{number}", number=number, __typename="PullRequest" if pr else "Issue"
         )
-        if include_activity:
-            fields = ["timelineItems", "comments"]
-            if pr:
-                fields += ["reviews", "reviewThreads"]
-            for field in fields:
-                item.update(connection(field).body["data"]["node"])
         parents.append(item)
         rest.append(rest_parent(number, pr=pr))
     session.responses = [repository(hasIssuesEnabled=True), Response(rest)]
@@ -395,7 +340,6 @@ def test_discovery_hydration_batch_limits(
                 datetime(2024, 2, 1, tzinfo=timezone.utc),
                 datetime(2024, 3, 1, tzinfo=timezone.utc),
                 strategy="bounded",
-                include_activity=include_activity,
             )
         )
     assert [item for _, item, _ in collected] == parents
@@ -407,7 +351,7 @@ def test_discovery_hydration_batch_limits(
         p for p in payloads if p["operationName"] == "HydrateRepositoryParents"
     ]
     assert [len(p["variables"]) - 1 for p in hydration] == sizes
-    assert all(("...HistoryIssue" in p["query"]) == include_activity for p in hydration)
+    assert all("...HistoryIssue" in p["query"] for p in hydration)
     assert not session.responses
     assert session.closed
 
@@ -452,7 +396,6 @@ def test_enriched_hydration_validates_whole_batch_and_never_falls_back(
                 datetime(2024, 2, 1, tzinfo=timezone.utc),
                 datetime(2024, 3, 1, tzinfo=timezone.utc),
                 strategy="bounded",
-                include_activity=True,
             ):
                 collected.append(item)
     assert len(collected) == batch * 20
@@ -557,12 +500,13 @@ class SourceSession(Session):
             return repository(hasIssuesEnabled=self.issues_enabled)
         if operation == "HydrateRepositoryParents":
             by_number = {p["number"]: p for _, p in self.source}
-            return hydrated(
-                *[
-                    deepcopy(by_number[values[f"number{i}"]])
-                    for i in range(len(values) - 1)
-                ]
-            )
+            items = [
+                deepcopy(by_number[values[f"number{i}"]])
+                for i in range(len(values) - 1)
+            ]
+            for item in items:
+                self.embed_parent(item)
+            return hydrated(*items)
         if operation in ("RepositoryIssues", "RepositoryPullRequests"):
             field = "issues" if operation == "RepositoryIssues" else "pullRequests"
             kind = "Issue" if field == "issues" else "PullRequest"
@@ -580,12 +524,40 @@ class SourceSession(Session):
             items = self.nested.get((operation, values["id"]), [])
         offset = int(values.get("after") or 0)
         more = offset + 1 < len(items)
+        nodes = deepcopy(items[offset : offset + 1])
+        for item in nodes:
+            if operation in ("RepositoryIssues", "RepositoryPullRequests"):
+                self.embed_parent(item)
+            elif operation == "PullRequestReviewThreads":
+                item["comments"] = self.initial("ReviewThreadComments", item["id"])
         return connection(
-            field,
-            deepcopy(items[offset : offset + 1]),
-            more=more,
-            cursor=str(offset + 1) if more else None,
+            field, nodes, more=more, cursor=str(offset + 1) if more else None
         )
+
+    def initial(self, operation, node_id):
+        items = deepcopy(self.nested.get((operation, node_id), []))
+        from .github import page
+
+        result = page(
+            items[:1], more=len(items) > 1, cursor="1" if len(items) > 1 else None
+        )
+        if operation == "PullRequestReviewThreads":
+            for thread in result["nodes"]:
+                thread["comments"] = self.initial("ReviewThreadComments", thread["id"])
+        return result
+
+    def embed_parent(self, item):
+        issues = item["__typename"] == "Issue"
+        fields = {
+            "timelineItems": "IssueLifecycle" if issues else "PullRequestLifecycle",
+            "comments": "IssueComments" if issues else "PullRequestComments",
+        }
+        if not issues:
+            fields.update(
+                reviews="PullRequestReviews", reviewThreads="PullRequestReviewThreads"
+            )
+        for field, operation in fields.items():
+            item[field] = self.initial(operation, item["id"])
 
     def get(self, endpoint, **kwargs):
         self.calls.append((endpoint, deepcopy(kwargs)))
@@ -621,7 +593,13 @@ def run_source(monkeypatch, source, strategy, *, month=2):
     source.closed = False
     monkeypatch.setattr("requests.Session", lambda: source)
     monkeypatch.setattr(collection, "_utc_now", lambda: NOW)
-    result = api.collect_month("o", "r", 2024, month, token="test", discovery=strategy)
+    if strategy == "full":
+        key = f"2024-{month:02d}"
+        result = api.history_to_months(
+            api.collect_history("o", "r", token="test"), key, key
+        )[0]
+    else:
+        result = collect_update_report(month=month)
     assert source.closed
     api.validate_report(result)
     assert api.report_from_json(api.report_to_json(result)) == result
@@ -655,21 +633,13 @@ def test_shared_histories_produce_identical_complete_reports(
         tuple(
             item
             for item in bounded_report.metadata.coverage.limitations
-            if item != BOUNDED_DISCOVERY_LIMITATION
+            if item not in (BOUNDED_DISCOVERY_LIMITATION, BOUNDED_LIMITATION)
         )
         == full.metadata.coverage.limitations
     )
-    # Only strategy provenance and its associated limitation differ.
-    assert without_run_ids(full) == without_run_ids(
-        replace(
-            bounded_report,
-            metadata=replace(
-                bounded_report.metadata,
-                parent_discovery="full",
-                coverage_limitations=full.metadata.coverage.limitations,
-            ),
-        )
-    )
+    assert full.activities == bounded_report.activities
+    assert full.actors == bounded_report.actors
+    assert full.summaries == bounded_report.summaries
     assert bounded_report.metadata.ongoing == (month == 4)
     if month == 2:
         kinds = {a.type for a in full.activities}
@@ -727,10 +697,6 @@ def test_rest_bounds_normalize_timezones(session, created, updated, kept):
     if kept:
         responses += [
             hydrated(parent("P_kept", __typename="PullRequest", date=created)),
-            connection("timelineItems"),
-            connection("comments"),
-            connection("reviews"),
-            connection("reviewThreads"),
         ]
     result = bounded(session, responses)
     assert len(result.activities) == int(kept)
@@ -739,11 +705,10 @@ def test_rest_bounds_normalize_timezones(session, created, updated, kept):
 def test_multiple_hydration_batches_succeed(session):
     responses = [
         repository(),
-        Response([rest_parent(n, pr=True) for n in range(1, 52)]),
+        Response([rest_parent(n, pr=True) for n in range(1, 42)]),
     ]
-    for numbers in (range(1, 51), range(51, 52)):
-        numbers = list(numbers)
-        responses += [
+    for numbers in (range(1, 21), range(21, 41), range(41, 42)):
+        responses.append(
             hydrated(
                 *[
                     parent(
@@ -755,33 +720,10 @@ def test_multiple_hydration_batches_succeed(session):
                     for n in numbers
                 ]
             )
-        ]
-        responses += [
-            r
-            for _ in numbers
-            for r in (
-                connection("timelineItems"),
-                connection("comments"),
-                connection("reviews"),
-                connection("reviewThreads"),
-            )
-        ]
+        )
     report = bounded(session, responses)
-    assert len(report.activities) == 51
+    assert len(report.activities) == 41
     api.validate_report(report)
-
-
-def test_explicit_bounded_matches_default_request_sequence(session):
-    history = [repository(), Response([])]
-    session.responses = deepcopy(history)
-    default = api.collect_month("o", "r", 2024, 2, token="test")
-    assert default.metadata.provenance.last_updated_by.parent_discovery == "bounded"
-    calls = deepcopy(session.calls)
-    session.calls.clear()
-    session.responses = deepcopy(history)
-    explicit = api.collect_month("o", "r", 2024, 2, token="test", discovery="bounded")
-    assert without_run_ids(default) == without_run_ids(explicit)
-    assert session.calls == calls
 
 
 def test_live_style_numeric_pagination_path(session):

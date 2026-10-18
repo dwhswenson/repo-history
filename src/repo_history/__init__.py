@@ -2,7 +2,6 @@
 
 from .authentication import resolve_token
 from .backfill import backfill
-from .collection import collect_month
 from .errors import (
     AuthenticationError,
     GitHubAPIError,
@@ -80,7 +79,6 @@ __all__ = [
     "RepositoryUnavailableError",
     "TransportError",
     "lookup_repository",
-    "collect_month",
     "resolve_token",
     "ACTIVITY_TYPES",
     "Activity",

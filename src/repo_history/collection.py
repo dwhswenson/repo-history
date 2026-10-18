@@ -1,12 +1,10 @@
-"""Synchronous monthly GitHub activity collection; no report files are written."""
+"""Shared normalization and embedded-page activity traversal."""
 
-import logging
 import re
 from dataclasses import replace
 from datetime import datetime, timezone
 
 from ._progress import emit
-from .discovery import BOUNDED_DISCOVERY_LIMITATION, discover_parents, select_strategy
 from .errors import GraphQLError
 from .models import (
     Activity,
@@ -16,7 +14,6 @@ from .models import (
     IssueCommentMetadata,
     IssueOpenedMetadata,
     IssueReopenedMetadata,
-    MonthlyReport,
     PRConversationCommentMetadata,
     PRInlineReviewCommentMetadata,
     PRMergedMetadata,
@@ -32,15 +29,10 @@ from .queries import (
     ISSUE_TIMELINE_QUERY,
     PR_COMMENTS_QUERY,
     PR_REVIEWS_QUERY,
-    PR_THREADS_QUERY,
     PR_TIMELINE_QUERY,
     THREAD_COMMENTS_QUERY,
 )
-from .reports import build_report
-from .repository import lookup_repository
-from .transport import GraphQLClient, _parent_log_context
-
-LOG = logging.getLogger(__name__)
+from .transport import _parent_log_context
 
 COVERAGE_LIMITATIONS = (
     "Unlinked Git identities are estimates based on email or name; account "
@@ -56,10 +48,6 @@ COVERAGE_LIMITATIONS = (
     "Collection is not a transactional GitHub snapshot; concurrent changes and "
     "newly available data may revise results on a later rerun.",
 )
-
-
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 def _in_interval(occurred, start, end):
@@ -78,52 +66,6 @@ def _month_bounds(year: int, month: int) -> tuple[datetime, datetime]:
     except ValueError as exc:
         raise ValueError("unsupported calendar month") from exc
     return start, end
-
-
-def collect_month(
-    owner: str,
-    repo: str,
-    year: int,
-    month: int,
-    *,
-    token: str | None = None,
-    discovery: str = "bounded",
-) -> MonthlyReport:
-    """Return a validated activity report for one UTC calendar month.
-
-    Commits use a 24-hour buffered history query in either discovery mode.
-    See coverage limitations before interpreting counts. A failed traversal
-    raises without returning a partial report. Authentication falls back to
-    GH_TOKEN, then GITHUB_TOKEN. The client is always closed on exit.
-    Discovery defaults to bounded traversal. The bounded strategy is
-    experimental: completeness of parent update timestamps is unverified.
-    """
-    if any(not isinstance(value, str) or not value.strip() for value in (owner, repo)):
-        raise ValueError("owner and repo must be nonempty strings")
-    if discovery not in ("full", "bounded"):
-        raise ValueError("discovery must be full or bounded")
-    start, end = _month_bounds(year, month)
-    started = _utc_now()
-    if start > started:
-        raise ValueError("future month")
-    with GraphQLClient(token) as client:
-        completed = False
-        try:
-            report = _collect_month(client, owner, repo, start, end, started, discovery)
-            completed = True
-            return report
-        finally:
-            rest = client._api_usage["rest"]
-            graphql = client._api_usage["graphql"]
-            LOG.info(
-                "GitHub API usage status=%s REST points=%s unmeasured_attempts=%s "
-                "GraphQL points=%s unmeasured_attempts=%s",
-                "completed" if completed else "failed",
-                rest.points,
-                rest.unmeasured_attempts,
-                graphql.points,
-                graphql.unmeasured_attempts,
-            )
 
 
 def _object(value, operation: str) -> dict:
@@ -232,9 +174,7 @@ class _Records:
             self.actors[actor.key] = actor
 
 
-def _collect_parent(
-    client, value, operation, start, end, records, *, issues, initial_pages=False
-):
+def _collect_parent(client, value, operation, start, end, records, *, issues):
     parent = _object(value, operation)
     author = _actor(_field(parent, "author", operation), operation)
     subject = _subject(parent, "issue" if issues else "pull_request", author, operation)
@@ -261,25 +201,22 @@ def _collect_parent(
         )
     emit("detail", detail=f"{'Issue' if issues else 'PR'} #{subject.number}")
     with _parent_log_context("issue" if issues else "pr", subject.number):
-        initial = parent if initial_pages else None
         _collect_timeline(
-            client, subject, author, start, end, records, issues=issues, initial=initial
+            client, subject, author, start, end, records, issues=issues, initial=parent
         )
         _collect_comments(
-            client, subject, author, start, end, records, issues=issues, initial=initial
+            client, subject, author, start, end, records, issues=issues, initial=parent
         )
         if not issues:
             _collect_reviews(
-                client, subject, author, start, end, records, initial=initial
+                client, subject, author, start, end, records, initial=parent
             )
             _collect_threads(
-                client, subject, author, start, end, records, initial=initial
+                client, subject, author, start, end, records, initial=parent
             )
 
 
-def _collect_timeline(
-    client, subject, author, start, end, records, *, issues, initial=None
-):
+def _collect_timeline(client, subject, author, start, end, records, *, issues, initial):
     operation = "IssueLifecycle" if issues else "PullRequestLifecycle"
     events = _nodes(
         client,
@@ -337,22 +274,14 @@ def _collect_timeline(
             )
 
 
-def _nodes(client, query, operation, node_id, field, *, initial=None, page_size=100):
-    if initial is not None:
-        return iter_embedded_connection(
-            client,
-            _field(initial, field, operation),
-            query,
-            node_id,
-            field,
-            operation,
-            page_size=page_size,
-        )
-    return client.iter_connection(
+def _nodes(client, query, operation, node_id, field, *, initial, page_size=100):
+    return iter_embedded_connection(
+        client,
+        _field(initial, field, operation),
         query,
-        {"id": node_id},
-        operation_name=operation,
-        connection_path=("node", field),
+        node_id,
+        field,
+        operation,
         page_size=page_size,
     )
 
@@ -388,9 +317,7 @@ def _add_authored(
         )
 
 
-def _collect_comments(
-    client, subject, author, start, end, records, *, issues, initial=None
-):
+def _collect_comments(client, subject, author, start, end, records, *, issues, initial):
     operation = "IssueComments" if issues else "PullRequestComments"
     query = ISSUE_COMMENTS_QUERY if issues else PR_COMMENTS_QUERY
     kind = "issue_comment" if issues else "pr_conversation_comment"
@@ -415,7 +342,7 @@ def _collect_comments(
         )
 
 
-def _collect_reviews(client, subject, author, start, end, records, *, initial=None):
+def _collect_reviews(client, subject, author, start, end, records, *, initial):
     operation = "PullRequestReviews"
     for value in _nodes(
         client, PR_REVIEWS_QUERY, operation, subject.node_id, "reviews", initial=initial
@@ -455,16 +382,16 @@ def _boolean(item, name, operation):
     return value
 
 
-def _collect_threads(client, subject, author, start, end, records, *, initial=None):
+def _collect_threads(client, subject, author, start, end, records, *, initial):
     operation = "PullRequestReviewThreads"
     for value in _nodes(
         client,
-        HISTORY_PR_THREADS_QUERY if initial is not None else PR_THREADS_QUERY,
+        HISTORY_PR_THREADS_QUERY,
         operation,
         subject.node_id,
         "reviewThreads",
         initial=initial,
-        page_size=HISTORY_THREAD_PAGE_SIZE if initial is not None else 100,
+        page_size=HISTORY_THREAD_PAGE_SIZE,
     ):
         thread = _object(value, operation)
         thread_id = _string(thread, "id", operation)
@@ -480,7 +407,7 @@ def _collect_threads(client, subject, author, start, end, records, *, initial=No
             start,
             end,
             records,
-            initial=thread if initial is not None else None,
+            initial=thread,
         )
 
 
@@ -495,7 +422,7 @@ def _collect_inline_comments(
     end,
     records,
     *,
-    initial=None,
+    initial,
 ):
     operation = "ReviewThreadComments"
     for value in _nodes(
@@ -545,63 +472,3 @@ def _collect_inline_comments(
             end,
             operation,
         )
-
-
-def _collect_month(
-    client, owner, repo, start, end, started, discovery="bounded"
-) -> MonthlyReport:
-    from .commits import BOUNDED_LIMITATION, collect_commits
-
-    repository = lookup_repository(client, owner, repo)
-    records = _Records()
-    discovery = select_strategy(start, discovery)
-    for issues, parent, operation in discover_parents(
-        client, repository, start, end, strategy=discovery
-    ):
-        _collect_parent(client, parent, operation, start, end, records, issues=issues)
-    limitations = COVERAGE_LIMITATIONS
-    if discovery == "bounded":
-        limitations += (BOUNDED_DISCOVERY_LIMITATION,)
-    strategy = collect_commits(client, repository, start, end, records)
-    if strategy == "bounded":
-        limitations += (BOUNDED_LIMITATION,)
-    if not repository.issues_enabled:
-        limitations += ("Issues are disabled; the issue connection was not collected.",)
-    from .models import RepositoryHistory
-    from .provenance import make_run, report_metadata
-
-    if repository.created_at is None:
-        raise GraphQLError(
-            "missing repository creation timestamp", operation="RepositoryLookup"
-        )
-    finished = _utc_now()
-    run = make_run(
-        "collect_month",
-        started,
-        finished,
-        since=start,
-        until=end,
-        parents=discovery,
-        commits=strategy,
-        requested_start=f"{start.year:04d}-{start.month:02d}",
-        requested_end=f"{start.year:04d}-{start.month:02d}",
-    )
-    snapshot = RepositoryHistory(
-        repository.repository_node_id,
-        repository.repository_full_name,
-        repository.repository_url,
-        repository.created_at,
-        repository.default_branch,
-        repository.default_branch_head,
-        started,
-        finished,
-        limitations,
-        (),
-        (),
-        run,
-    )
-    metadata = report_metadata(
-        snapshot, f"{start.year:04d}-{start.month:02d}", start, end
-    )
-
-    return build_report(metadata, records.actors.values(), records.activities.values())

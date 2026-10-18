@@ -10,8 +10,6 @@ from .queries import (
     HISTORY_ISSUES_QUERY,
     HISTORY_PARENT_PAGE_SIZE,
     HISTORY_PULL_REQUESTS_QUERY,
-    ISSUES_QUERY,
-    PULL_REQUESTS_QUERY,
     parent_hydration_query,
 )
 from .rest_pagination import iter_rest_list
@@ -53,9 +51,7 @@ def select_strategy(start, strategy):
     return strategy
 
 
-def discover_parents(
-    client, repository, start, end, *, strategy, include_activity=False
-):
+def discover_parents(client, repository, start, end, *, strategy):
     """Traverse using the strategy already selected by select_strategy."""
     if strategy == "full":
         for issues in (True, False):
@@ -65,15 +61,13 @@ def discover_parents(
                 continue
             emit("start", stage=stage)
             operation = "RepositoryIssues" if issues else "RepositoryPullRequests"
-            query = ISSUES_QUERY if issues else PULL_REQUESTS_QUERY
-            if include_activity:
-                query = HISTORY_ISSUES_QUERY if issues else HISTORY_PULL_REQUESTS_QUERY
+            query = HISTORY_ISSUES_QUERY if issues else HISTORY_PULL_REQUESTS_QUERY
             for item in client.iter_connection(
                 query,
                 {"id": repository.repository_node_id},
                 operation_name=operation,
                 connection_path=("node", "issues" if issues else "pullRequests"),
-                page_size=HISTORY_PARENT_PAGE_SIZE if include_activity else 100,
+                page_size=HISTORY_PARENT_PAGE_SIZE,
             ):
                 yield issues, item, operation
                 emit("advance", stage=stage)
@@ -134,14 +128,14 @@ def discover_parents(
             retained[number] = issues
 
     candidates = list(retained.items())
-    batch_size = HISTORY_PARENT_PAGE_SIZE if include_activity else 50
+    batch_size = HISTORY_PARENT_PAGE_SIZE
     for offset in range(0, len(candidates), batch_size):
         batch = candidates[offset : offset + batch_size]
         variables = {"id": repository.repository_node_id}
         variables.update({f"number{i}": number for i, (number, _) in enumerate(batch)})
         operation = "HydrateRepositoryParents"
         data = client.execute(
-            parent_hydration_query(len(batch), include_activity=include_activity),
+            parent_hydration_query(len(batch)),
             variables,
             operation_name=operation,
         )

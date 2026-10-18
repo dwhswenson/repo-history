@@ -324,3 +324,13 @@ def test_summary_source_failure_does_not_complete_stage(tmp_path, mixed, broken)
     assert set(display.stages) == {"Reports"}
     assert not (tmp_path / "manifest.json").exists()
     assert not enabled()
+
+
+def test_retired_collector_reports_still_summarize_offline(tmp_path, mixed):
+    data = json.loads(report_to_json(mixed))
+    for run in data["metadata"]["provenance"].values():
+        run["command"] = "collect_month"
+    (tmp_path / "2024-02.json").write_text(json.dumps(data))
+    assert main(["summarize", "--input-directory", str(tmp_path), "--quiet"]) == 0
+    value = json.loads((tmp_path / "manifest.json").read_text())
+    assert value == build_manifest([report_from_json(json.dumps(data))])

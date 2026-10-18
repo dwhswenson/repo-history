@@ -6,26 +6,28 @@ from collections import Counter
 from copy import deepcopy
 from dataclasses import FrozenInstanceError
 from datetime import datetime, timedelta, timezone
-from time import perf_counter
 
 import pytest
 
 import repo_history as api
-from repo_history import cli, collection
+from repo_history import cli
 from repo_history import history as module
 
-from .helpers import Response, Session, errors, repository, without_run_ids
-from .test_collection import (
+from .github import (
     actor,
     comment,
+    commit,
     connection,
     event,
+    history,
+    identity,
     inline,
+    page,
     parent,
     review,
     thread,
 )
-from .test_commits import commit, history, identity, page
+from .helpers import Response, Session, errors, repository, without_run_ids
 
 backfill_module = importlib.import_module("repo_history.backfill")
 NOW = datetime(2024, 4, 15, tzinfo=timezone.utc)
@@ -217,7 +219,6 @@ def session(monkeypatch):
     )
     monkeypatch.setattr("requests.Session", lambda: result)
     monkeypatch.setattr(module, "_utc_now", lambda: NOW)
-    monkeypatch.setattr(collection, "_utc_now", lambda: NOW)
     monkeypatch.setattr(backfill_module, "_utc_now", lambda: NOW)
     monkeypatch.setattr("repo_history.transport.time.sleep", lambda _: None)
     return result
@@ -293,51 +294,40 @@ def test_snapshot_and_offline_months(session):
     )
 
 
-def test_monthly_equivalence_and_request_measurement(session, tmp_path, caplog):
+def test_backfill_collects_once_and_groups_offline(session, tmp_path, caplog):
     caplog.set_level(logging.INFO, logger="repo_history")
-    timer = perf_counter()
     paths = api.backfill(
-        "o",
-        "r",
-        "2024-01",
-        "2024-03",
-        output_directory=tmp_path / "history",
-        token="test",
+        "o", "r", "2024-01", "2024-03", output_directory=tmp_path, token="test"
     )
-    history_seconds = perf_counter() - timer
-    grouped = [api.report_from_json(p.read_text()) for p in paths]
-    history_requests = len(session.calls)
-    history_cost = sum(int("points=" in r.message) for r in caplog.records)
-    assert history_cost == 1
+    assert [p.stem for p in paths] == ["2024-01", "2024-02", "2024-03"]
+    assert len(session.calls) == 16
+    assert "GraphQL requests=16 retries=0 points=16" in caplog.text
     assert (
-        f"GraphQL requests={history_requests} retries=0 points={history_requests}"
-        in caplog.text
+        Counter(p["operationName"] for p in requests(session))["RepositoryLookup"] == 1
     )
-    session.calls.clear()
-    timer = perf_counter()
-    paths = [
-        api.write_report(
-            api.collect_month("o", "r", 2024, month, token="test", discovery="full"),
-            tmp_path / "monthly",
-        )
-        for month in (1, 2, 3)
-    ]
-    monthly_seconds = perf_counter() - timer
-    monthly = [api.report_from_json(p.read_text()) for p in paths]
-    for actual, expected in zip(grouped, monthly, strict=True):
-        assert actual.activities == expected.activities
-        assert actual.actors == expected.actors
-        assert actual.summaries == expected.summaries
-    assert history_requests < len(session.calls)
-    print(
-        f"fixture history: {history_requests} requests/points, {history_seconds:.3f}s; monthly: {len(session.calls)} requests/points, {monthly_seconds:.3f}s"
+    reports = [api.report_from_json(p.read_text()) for p in paths]
+    assert reports[1].summaries.repository_counts["commit"] == 1
+    assert all(
+        r.metadata.provenance.last_updated_by.commit_history == "full" for r in reports
+    )
+    assert not any(
+        p["variables"].get("after") is None
+        for p in requests(session)
+        if p["operationName"]
+        in {
+            "IssueLifecycle",
+            "IssueComments",
+            "PullRequestLifecycle",
+            "PullRequestComments",
+            "PullRequestReviews",
+            "PullRequestReviewThreads",
+            "ReviewThreadComments",
+        }
     )
 
 
 def test_unfiltered_history_recovers_commit_hidden_by_date_pruning(session):
     session.prune_commits = True
-    monthly = api.collect_month("o", "r", 2024, 2, token="test", discovery="full")
-    assert not any(a.type == "commit" for a in monthly.activities)
     full = api.history_to_months(collect(), "2024-02", "2024-02")[0]
     assert [a.metadata.sha for a in full.activities if a.type == "commit"] == ["c" * 40]
 
@@ -537,8 +527,7 @@ def test_retry_counts_and_costs_on_failed_collection(session, caplog):
     assert "unmeasured_attempts=4" in caplog.text
 
 
-@pytest.mark.parametrize("mode", ["history", "monthly"])
-def test_parent_numbers_in_nested_request_logs(session, caplog, mode):
+def test_parent_numbers_in_nested_request_logs(session, caplog):
     caplog.set_level(logging.DEBUG, logger="repo_history.transport")
     session.pages[("RepositoryIssues", "R_example", None)].body["data"]["node"][
         "issues"
@@ -546,10 +535,7 @@ def test_parent_numbers_in_nested_request_logs(session, caplog, mode):
     session.pages[("RepositoryPullRequests", "R_example", None)].body["data"]["node"][
         "pullRequests"
     ]["nodes"][0]["number"] = 87
-    if mode == "history":
-        collect()
-    else:
-        api.collect_month("o", "r", 2024, 2, token="test", discovery="full")
+    collect()
     issue_operations = {"IssueLifecycle", "IssueComments"}
     pr_operations = {
         "PullRequestLifecycle",
@@ -571,11 +557,7 @@ def test_parent_numbers_in_nested_request_logs(session, caplog, mode):
             assert " pr=87 " in message and " issue=" not in message
         else:
             assert " issue=" not in message and " pr=" not in message
-    expected_pr = (
-        pr_operations
-        if mode == "monthly"
-        else pr_operations - {"PullRequestLifecycle", "PullRequestComments"}
-    )
+    expected_pr = pr_operations - {"PullRequestLifecycle", "PullRequestComments"}
     assert (
         issue_operations
         | expected_pr
@@ -675,10 +657,6 @@ def test_all_nested_connections_and_later_threads_keep_paginating(session):
     )
     assert "comments(first:" in continuation["query"]
     assert continuation["variables"]["first"] == 10
-    reference = api.collect_month("o", "r", 2024, 2, token="test", discovery="full")
-    assert grouped.activities == reference.activities
-    assert grouped.actors == reference.actors
-    assert grouped.summaries == reference.summaries
     later = [
         a
         for a in grouped.activities

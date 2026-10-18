@@ -1,8 +1,8 @@
 # Repository history tracking
 
-Phases 1–6 provide a monthly report contract, a synchronous GitHub GraphQL
-foundation, monthly activity collection, atomic report writing, a CLI, and backfill.
-See [SPEC.md](SPEC.md) for the implementation phases.
+Collect GitHub repository activity with fast full-history backfills and bounded
+updates, then build monthly reports and visualization manifests offline.
+See [SPEC.md](SPEC.md) for the collection and report contracts.
 
 Requires Python 3.12+. Packaging and Pixi configuration are maintained together in
 `pyproject.toml`. Install with `pip install .`, or use the existing Pixi workspace:
@@ -124,9 +124,10 @@ These collection stages are specific to the backfill CLI; Python calls and
 Python callers can collect without writing, write an existing report, or backfill:
 
 ```python
-from repo_history import backfill, collect_month, write_report
+from repo_history import backfill, collect_history, history_to_months, write_report
 
-report = collect_month("example", "project", 2024, 2)
+history = collect_history("example", "project")
+report = history_to_months(history, "2024-02", "2024-02")[0]
 path = write_report(report, "reports")  # pathlib.Path: reports/2024-02.json
 paths = backfill(
     "example",
@@ -200,7 +201,7 @@ History queries request 20 parents per page, 20 items per activity connection,
 and 10 review threads per parent, bounding nested response sizes. Lean activity
 continuation queries request up to 100 items; thread continuation queries request
 10 threads with embedded comment pages. Existing resource-limit retries can
-reduce the outer page size. Standalone single-month Python collection retains its independent queries.
+reduce the outer page size. Update uses the same embedded-page traversal.
 
 Collection writes no files and raises without returning a partial snapshot if
 collection fails.
@@ -215,124 +216,106 @@ validation use the snapshot's collection-start month, even if grouping happens
 later. Future-dated source activities remain in the snapshot but are excluded
 from supported output months until a later collection.
 
-History collection retains the same accessible-source and default-branch coverage
-limits as monthly collection. It holds the complete normalized history in memory;
-there is no disk cache or interruption resume. History mode benefits multi-month
-initial builds; independent monthly collection may be cheaper for a narrow range.
+History collection holds the complete normalized history in memory; there is no
+disk cache or interruption resume. Use backfill for initial builds and update for
+recent intervals.
 Collection logs include elapsed time, request attempts, retries, measured REST and
 GraphQL points, and unmeasured attempts. Backfill also logs grouping/writing time.
 See [PERFORMANCE.md](PERFORMANCE.md) for deterministic measurements and limitations.
 
-## Monthly activity collection
+## Collection strategies
 
-```python
-from repo_history import collect_month, report_to_json, validate_report
+Backfill and update share one collector and activity normalization implementation.
+Backfill scans full history; update collects one requested interval. Both include
+`issue_opened`, `issue_closed`, `issue_reopened`, `pr_opened`, `pr_merged`,
+`issue_comment`, `pr_conversation_comment`, `pr_review`,
+`pr_inline_review_comment`, and `commit` activities. Coverage limitations are
+recorded in `metadata.coverage.limitations`.
 
-# Uses GH_TOKEN, falling back to GITHUB_TOKEN; token="..." is also supported.
-report = collect_month("example", "project", 2024, 2)
-validate_report(report)
-print(report.summaries.repository_counts)
-for activity in report.activities:
-    print(activity.id, activity.occurred_at, activity.credits)
-text = report_to_json(report)
+Months use exact UTC half-open boundaries. Future months and invalid CLI inputs
+are rejected before network requests. The ongoing flag uses collection start,
+even if the run finishes in a later month. Repository identity and the
+default-branch head are captured once, including a null head for an empty
+repository. The collector owns and closes its client, including on failure.
+Issue activity is skipped and recorded as a limitation when issues are disabled;
+PR collection still runs.
+
+The former independent `collect_month()` API and selectable discovery modes
+have been removed. For a single month, use:
+
+```text
+repo-history update example/project --start 2024-02 --end 2024-02 --output-directory reports
 ```
 
-`collect_month(owner, repo, year, month, *, token=None, discovery="bounded")` returns
-a validated `MonthlyReport` containing `issue_opened`, `issue_closed`, `issue_reopened`,
-`pr_opened`, `pr_merged`, `issue_comment`, `pr_conversation_comment`,
-`pr_review`, `pr_inline_review_comment`, and `commit` activities.
-Coverage limitations are recorded in `metadata.coverage.limitations`. No files
-are written.
+Python callers can collect full history with `collect_history()` and select
+months offline with `history_to_months()`. The report, serialization, validation,
+writing, and manifest APIs remain available.
+Existing reports with `collect_month` provenance can still be read and summarized.
 
-Months use exact UTC half-open boundaries. Future months and invalid inputs are
-rejected before network requests. The ongoing flag uses collection start, even
-if the run finishes in a later month. Repository identity and the default-branch
-head are captured once before traversal, including a null head for an empty
-repository. The function owns and closes its client, including on failure.
+### Buffered commit collection in update
 
-With `discovery="full"`, all issue/PR parent pages, lifecycle timelines,
-conversation comments, reviews, review threads, and thread comments are traversed independently, without
-creation-date or current-state filters. This finds events on older parents but
-can be expensive for large repositories. Requests begin
-with 100-item pages and reuse the client's page reductions and retry policy.
-Issue collection is skipped and recorded as a limitation when issues are
-disabled; PR collection still runs. The collector performs no persistent caching.
+Update collects commits from the captured default-branch SHA with GraphQL history
+bounded by 24 hours before interval start and 24 hours after interval end. It
+traverses every returned history page and filters committed dates locally to the
+exact interval before grouping into months. Backfill walks that captured head's
+history without date filters.
 
-### Buffered commit collection
-
-Both issue/PR discovery modes collect commits from the captured default-branch
-SHA using GraphQL history bounded by 24 hours before month start and 24 hours
-after the next month starts. Every returned history page is traversed, then
-commits are filtered to the exact UTC month using committed date. Authored date
-and committer metadata are preserved. Merge commits count, and each distinct
-author/co-author receives credit without increasing the repository commit count.
-Committers receive no separate credit. Headlines are included; full messages are
-omitted. GitHub-linked accounts use node IDs; unlinked Git identities use
-estimated email/name keys without inferred account matches or bot status.
-Commit-linked accounts reuse canonical issue/PR identities or are resolved by
-node ID once per run: GitHub can project a bot as a User inside commit authorship.
+Authored date and committer metadata are preserved. Merge commits count, and each
+distinct author/co-author receives credit without increasing the repository
+commit count. Committers receive no separate credit. Headlines are included;
+full messages are omitted. GitHub-linked accounts use node IDs; unlinked Git
+identities use estimated email/name keys without inferred account matches or
+bot status. Commit-linked accounts reuse canonical issue/PR identities or are
+resolved by node ID once per run: GitHub can project a bot as a User inside
+commit authorship.
 
 The buffer accommodates small clock errors but cannot guarantee completeness:
-GitHub's lower date bound may prune traversal before reaching an in-month
-ancestor when intermediate timestamps are unusually old. Full issue/PR discovery
-still uses this buffered commit query. Counts support trend reporting and annual
-summaries rather than exhaustive historical audits.
+GitHub's lower date bound may prune traversal before reaching an in-period
+ancestor when intermediate timestamps are unusually old. Counts support trend
+reporting and annual summaries rather than exhaustive historical audits.
 
-Reports record the actual strategy in `metadata.provenance.last_updated_by.commit_history` (`bounded`).
-If buffered dates overflow or exceed GraphQL's documented supported range
-(1970-01-01 through 2099-12-13), the collector internally selects unbounded
-history (`full`) and applies the same local month filter. When the optional
-provenance field is absent, the strategy is unknown. Empty repositories produce zero commits without a history request.
+Reports record the actual strategy in
+`metadata.provenance.last_updated_by.commit_history`. If buffered dates overflow
+or exceed the supported filter range (1970-01-01 through 2099-12-13), update
+selects unbounded history (`full`) before querying and applies the exact local
+interval filter. Empty repositories produce zero commits without a history request.
 
-### Experimental bounded parent discovery
+### Experimental bounded parent discovery in update
 
-```python
-report = collect_month("example", "project", 2024, 2, discovery="bounded")
-```
+Update uses the REST repository issues endpoint to discover issues and PRs in
+all states, using the resolved current repository name. It requests updates since
+one second before interval start, follows every next-page link, deduplicates item
+numbers, and retains parents with `updated_at >= start` and `created_at < end`.
+Updates after interval end remain eligible.
 
-`discovery="bounded"` uses the REST repository issues endpoint to discover both
-issues and PRs in all states, using the resolved current repository name. It
-requests updates since one second before month start, follows every next-page
-link, deduplicates item numbers, and retains parents with `updated_at >= start`
-and `created_at < end`. Updates after month end remain eligible. Candidate
-subjects and authors in standalone `collect_month` calls are hydrated through
-GraphQL in batches of up to 50 before the nested collectors retrieve their
-activities. CLI `update` instead hydrates up to 20 parents per batch with first
-activity pages: up to 20 lifecycle events, conversation comments, and reviews,
-plus 10 review threads with up to 20 inline comments each. Complete connections
-need no additional request. Overflow pages retain independent cursors; ordinary
-activity and inline-comment continuations request up to 100 items, while thread
-pages request up to 10 and keep embedding inline-comment pages. Activity date
-filtering remains local; candidate histories outside the requested range are
-still retrieved. Missing or malformed embedded pages fail the run. REST PR issue IDs are
-never used as GraphQL PullRequest IDs. REST uses API version `2026-03-10`.
+GraphQL hydrates up to 20 parents per batch with their first activity pages: up
+to 20 lifecycle events, conversation comments, and reviews, plus 10 review threads
+with up to 20 inline comments each. Complete connections need no additional
+request. Overflow pages retain independent cursors; ordinary activity and inline
+comment continuations request up to 100 items, while thread pages request up to
+10 and keep embedding inline-comment pages. Candidate histories are exhausted;
+activity date filtering remains local. Missing or malformed embedded pages fail
+the run. REST PR issue IDs are never used as GraphQL PullRequest IDs. REST uses
+API version `2026-03-10`.
 
 **Bounded discovery is experimental.** It has not been established that every
-counted activity advances its parent's REST update timestamp. A stale parent
-update timestamp can therefore omit activity. Keep full traversal for reference
-and audits; selecting bounded discovery does not establish report completeness.
-Only offline fixtures have been verified, including the disabled-issues case;
-live REST behavior when issues are disabled remains unverified. When issues are
-disabled, bounded discovery still requests REST parents and collects PRs, while
-skipping issue activity. Endpoint errors fail the run rather than yielding an
-empty report. Fine-grained credentials need the REST endpoint's **Issues: read**
-permission for private repositories in addition to the permissions required by
-GraphQL collection. See [repository issues endpoint permissions](https://docs.github.com/en/rest/issues/issues#list-repository-issues).
+counted activity advances its parent's REST update timestamp. A stale timestamp
+can therefore omit activity. Full-history backfill remains available when a full
+traversal is needed. Only offline fixtures have been verified, including the
+disabled-issues case; live REST behavior when issues are disabled remains
+unverified. Update still requests REST parents and collects PRs when issues are
+disabled. Endpoint errors fail the run rather than yielding an empty report.
+Fine-grained credentials need the REST endpoint's **Issues: read** permission for
+private repositories in addition to GraphQL permissions. See
+[repository issues endpoint permissions](https://docs.github.com/en/rest/issues/issues#list-repository-issues).
 
-Bounded mode validates the retrieved discovery records and retained parents'
-histories; it cannot detect malformed unrelated history on excluded parents.
-The activity rules are unchanged. Unknown discovery modes
-raise `ValueError` before requests. A failure never switches strategies or
-returns a partial report. For January of year 1 only, bounded mode selects full
-traversal before discovery to avoid overlap underflow and logs that selection.
-Reports record the actual selected strategy in `metadata.provenance.last_updated_by.parent_discovery`
-(`bounded` or `full`), independently of `metadata.provenance.last_updated_by.commit_history`. The selected
-strategy is also logged at INFO. Bounded reports include an explicit completeness
-warning in `metadata.coverage.limitations`. A null strategy means it is unknown (Python `None`)
-and is serialized explicitly. The January year-1 fallback records `full`.
-Bounded discovery is now the default by user preference; its completeness
-assumptions remain unverified. Instrumentation, comparison tooling, and live
-verification remain follow-on work described in `PERFORMANCE.md`.
+Bounded discovery validates retrieved discovery records and retained parents'
+histories; it cannot detect malformed history on excluded parents. Failures never
+switch strategies or return partial snapshots. For January of year 1, update
+selects full parent traversal before discovery to avoid overlap underflow.
+Reports and INFO logs record the actual parent and commit strategies separately.
+Bounded reports include explicit completeness warnings. See
+[PERFORMANCE.md](PERFORMANCE.md) for measurements and remaining verification work.
 
 ### Activity normalization
 
@@ -461,7 +444,7 @@ All API failures inherit `GitHubAPIError`: `AuthenticationError`, `TransportErro
 and `QueryResourceError` (also a `GraphQLError`). Exceptions expose applicable
 `operation`, `status`, `request_id`, `attempts`, `retry_after`, and `reset_at` fields.
 Unavailable repositories are not distinguished as missing versus inaccessible.
-Each `collect_month` run logs a final INFO usage summary on success or failure,
+Each collection logs a final INFO usage summary on success or failure,
 with separate REST and GraphQL primary-budget point totals. REST counts successful
 HTTP 200 requests (one primary-budget request each); GraphQL sums the reported
 `rateLimit.cost` from every response, including retries and hydration. Attempts

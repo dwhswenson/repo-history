@@ -66,7 +66,6 @@ def _run_update(
         started=now,
         start=first,
         end=after,
-        discovery="bounded",
     )
     from .provenance import make_run
     from .state import write_collection_state

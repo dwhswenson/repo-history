@@ -173,44 +173,6 @@ fragment LifecyclePullRequest on PullRequest {
 }
 """
 
-ISSUES_QUERY = (
-    ACTOR_FRAGMENT
-    + ISSUE_SUBJECT_FRAGMENT
-    + PAGE_INFO_FRAGMENT
-    + """
-query RepositoryIssues($id: ID!, $first: Int!, $after: String) {
-  rateLimit { cost }
-  node(id: $id) {
-    ... on Repository {
-      issues(first: $first, after: $after) {
-        nodes { ...LifecycleIssue }
-        pageInfo { ...ForwardPageInfo }
-      }
-    }
-  }
-}
-"""
-)
-
-PULL_REQUESTS_QUERY = (
-    ACTOR_FRAGMENT
-    + PR_SUBJECT_FRAGMENT
-    + PAGE_INFO_FRAGMENT
-    + """
-query RepositoryPullRequests($id: ID!, $first: Int!, $after: String) {
-  rateLimit { cost }
-  node(id: $id) {
-    ... on Repository {
-      pullRequests(first: $first, after: $after) {
-        nodes { ...LifecyclePullRequest }
-        pageInfo { ...ForwardPageInfo }
-      }
-    }
-  }
-}
-"""
-)
-
 ISSUE_EVENTS_FRAGMENT = """
 fragment LifecycleClosure on ClosedEvent {
   id
@@ -337,12 +299,6 @@ PR_REVIEWS_QUERY = _connection_query(
     REVIEW_FIELDS,
     ACTOR_FRAGMENT,
 )
-PR_THREADS_QUERY = _connection_query(
-    "PullRequestReviewThreads",
-    "PullRequest",
-    "reviewThreads",
-    "id isResolved isOutdated",
-)
 THREAD_COMMENTS_QUERY = _connection_query(
     "ReviewThreadComments",
     "PullRequestReviewThread",
@@ -456,28 +412,29 @@ query RepositoryPullRequests($id: ID!, $first: Int!, $after: String) {
 )
 
 
-def parent_hydration_query(count: int, *, include_activity: bool = False) -> str:
+def parent_hydration_query(count: int) -> str:
     """Build aliases from batch positions; repository and item values stay variables."""
-    if type(count) is not int or not 1 <= count <= 50:
-        raise ValueError("hydration batch size must be between 1 and 50")
-    fragments = ACTOR_FRAGMENT + ISSUE_SUBJECT_FRAGMENT + PR_SUBJECT_FRAGMENT
-    issue_fragment, pr_fragment = "LifecycleIssue", "LifecyclePullRequest"
-    if include_activity:
-        fragments += (
-            ISSUE_EVENTS_FRAGMENT
-            + MERGE_EVENT_FRAGMENT
-            + COMMENT_FRAGMENT
-            + PAGE_INFO_FRAGMENT
-            + _HISTORY_ISSUE_FRAGMENT
-            + _HISTORY_PR_FRAGMENT
+    if type(count) is not int or not 1 <= count <= HISTORY_PARENT_PAGE_SIZE:
+        raise ValueError(
+            f"hydration batch size must be between 1 and {HISTORY_PARENT_PAGE_SIZE}"
         )
-        issue_fragment, pr_fragment = "HistoryIssue", "HistoryPullRequest"
+    fragments = (
+        ACTOR_FRAGMENT
+        + ISSUE_SUBJECT_FRAGMENT
+        + PR_SUBJECT_FRAGMENT
+        + ISSUE_EVENTS_FRAGMENT
+        + MERGE_EVENT_FRAGMENT
+        + COMMENT_FRAGMENT
+        + PAGE_INFO_FRAGMENT
+        + _HISTORY_ISSUE_FRAGMENT
+        + _HISTORY_PR_FRAGMENT
+    )
     declarations = ", ".join(f"$number{i}: Int!" for i in range(count))
     fields = "\n".join(
         f"""parent{i}: issueOrPullRequest(number: $number{i}) {{
           __typename
-          ...{issue_fragment}
-          ...{pr_fragment}
+          ...HistoryIssue
+          ...HistoryPullRequest
         }}"""
         for i in range(count)
     )

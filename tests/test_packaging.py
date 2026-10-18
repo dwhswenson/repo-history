@@ -65,11 +65,12 @@ import sys
 from pathlib import Path
 import repo_history as r
 assert Path(r.__file__).is_relative_to(Path(sys.prefix)), r.__file__
+assert not hasattr(r, "collect_month")
 assert r.load_schema()['$id'] == 'urn:repo-history-tracking:monthly-report:1'
 from repo_history.queries import REPOSITORY_QUERY, PAGE_INFO_FRAGMENT
 assert 'query RepositoryLookup' in REPOSITORY_QUERY
 assert 'endCursor' in PAGE_INFO_FRAGMENT
-for name in ('collect_month', 'GraphQLClient', 'resolve_token', 'RepositorySnapshot',
+for name in ('collect_history', 'history_to_months', 'build_manifest', 'write_manifest', 'GraphQLClient', 'resolve_token', 'RepositorySnapshot',
              'write_report', 'backfill', 'ReportWriteError',
              'lookup_repository', 'GitHubAPIError', 'AuthenticationError',
              'TransportError', 'GraphQLError', 'RateLimitError',

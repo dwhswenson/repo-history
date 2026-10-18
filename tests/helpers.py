@@ -7,7 +7,7 @@ def empty_commits(client, repository, start, end, records):
     """Isolate lifecycle/discovery suites; commit integration has its own suite."""
     from repo_history.commits import history_bounds
 
-    strategy, _ = history_bounds(start, end)
+    strategy, _ = ("full", {}) if start is None else history_bounds(start, end)
     return strategy
 
 

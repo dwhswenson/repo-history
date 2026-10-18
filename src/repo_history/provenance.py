@@ -58,7 +58,7 @@ def report_metadata(
         parents=parents,
         commits=commits,
     )
-    # A single-month collector cannot establish a repository's earliest history.
+    # Bounded updates cannot establish a repository's earliest history.
     if history_start is not None and not (
         run.collection_since is None
         and run.parent_discovery == run.commit_history == "full"

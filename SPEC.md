@@ -2,12 +2,11 @@
 
 ## Goal and interfaces
 
-Build a Python library and CLI that collects repository history once for initial backfills, groups activities into monthly reports offline, and writes `YYYY-MM.json`. Expose backfill, update, and summarize CLI commands; retain standalone single-month collection through the Python API.
+Build a Python library and CLI that collects repository history once for initial backfills, groups activities into monthly reports offline, and writes `YYYY-MM.json`. Expose backfill, update, and summarize CLI commands; use one embedded-page collector for both workflows.
 
 Reports support casual activity reporting, year-over-year growth analysis, and annual reports to funders. Counts should be useful and consistent, but exhaustive historical reconstruction is not required. Document known coverage limitations and favor practical collection costs where the tradeoff is explicit. Exact month assignment, attribution rules, deduplication, and internally consistent summaries still apply to collected events.
 
 ```python
-collect_month(owner, repo, year, month, *, token=None, discovery="bounded") -> MonthlyReport
 collect_history(owner, repo, *, token=None) -> RepositoryHistory
 history_to_months(history, start=None, end=None) -> list[MonthlyReport]
 backfill(owner, repo, start=None, end=None, *, output_directory, token=None) -> list[Path]
@@ -40,9 +39,12 @@ accepts `--mode` or `--discovery`; Python backfill also removes these options.
 Summarize replaces the former manifest command and generates the existing
 visualizer manifest offline. Collection does not regenerate it. The implicit
 single-month CLI and manifest command are removed; use update with equal endpoints
-for one month. The standalone `collect_month` API and JSON schemas remain compatible.
+for one month. The independent `collect_month` API is removed. Report parsing,
+validation, writing, offline grouping, and manifest generation remain available.
 
-Single-month collection uses buffered commit history in both parent discovery modes. History-first collection always uses unfiltered commit history and full GraphQL parent discovery.
+Update uses bounded parent discovery and buffered commit history for its interval.
+Backfill always uses unfiltered commit history and full GraphQL parent discovery.
+Both workflows embed first activity pages and independently paginate overflow.
 
 Each month is independently collectable and replaceable. Earlier reports are not required. **Monthly files contain no cumulative counts**; a later visualizer can compute these from stable actor identities, individual events, and per-actor monthly counts.
 
@@ -96,19 +98,19 @@ Supplement schema validation with checks that actor references resolve, event ID
 
 ## Collection behavior and edge cases
 
-- A monthly run collects and writes only the requested month. It may inspect older parent objects to find that month's activity; it must not generate earlier reports or require earlier outputs.
+- An update with equal start/end months collects and writes only that month. It may inspect older parent objects to find that month's activity; it must not generate earlier reports or require earlier outputs.
 - Do not select parent issues or PRs solely by creation month or current state. An old, closed PR can receive a new comment or review; an old issue can close or reopen in the requested month.
-- Full issue/PR parent traversal (`discovery="full"`) remains the explicit reference behavior for parent discovery. Use repository connections directly, GraphQL variables, and reusable fragments. Independently paginate parents and nested timelines, comments, reviews, review threads, and commit authors. Detect missing or repeated cursors. [Pagination documentation](https://docs.github.com/en/graphql/guides/using-pagination-in-the-graphql-api)
-- Default `discovery="bounded"` uses REST repository issues with all states and an overlapping update-time `since`, local `updated_at >= start` / `created_at < end` selection, and GraphQL hydration by repository identity and item number. Preserve all nested activity rules and the report schema. Completeness of REST parent update timestamps, including live discovery with issues disabled, remains unverified. Bounded is the default by user preference; the acceptance work in PERFORMANCE.md remains outstanding. Excluded parent histories are outside bounded mode's validation scope. Failures never silently switch strategies; January of year 1 selects full traversal before discovery because the overlap would underflow.
+- Backfill uses full issue/PR parent traversal. Use repository connections directly, GraphQL variables, and reusable fragments. Independently paginate parents and nested timelines, comments, reviews, review threads, and commit authors. Detect missing or repeated cursors. [Pagination documentation](https://docs.github.com/en/graphql/guides/using-pagination-in-the-graphql-api)
+- Update uses REST repository issues with all states and an overlapping update-time `since`, local `updated_at >= start` / `created_at < end` selection, and GraphQL hydration by repository identity and item number. Preserve all nested activity rules and the report schema. Completeness of REST parent update timestamps, including live discovery with issues disabled, remains unverified. The verification work in PERFORMANCE.md remains outstanding. Excluded parent histories are outside bounded mode's validation scope. Failures never silently switch strategies; January of year 1 selects full traversal before discovery because the overlap would underflow.
 - Enforce exact month boundaries locally after retrieval. Apply API date filters with understood semantics and explicit coverage limitations.
 - Capture the default-branch head before traversing commits. Use that SHA as the history root in both commit-history strategies.
-- Single-month commit collection requests history with `since = month start - 24 hours` and `until = next month start + 24 hours`. Fully paginate the API results, then retain only commits whose committed dates fall in the exact requested month. This buffer accommodates small timestamp inversions but does not guarantee exhaustive retrieval: the API's lower bound can prune traversal before reaching matching ancestors. Record the strategy and this limitation in report metadata. If buffered bounds fall outside the API's documented supported date range, select full history traversal before querying and record the strategy actually used.
-- Never stop commit pagination merely because an encountered commit or page has an old date. Single-month collection uses full history as a fallback for unsupported filter dates; `collect_history` always requests unfiltered history.
+- Update requests commit history with `since = interval start - 24 hours` and `until = interval end + 24 hours`. Fully paginate the API results, then retain only commits whose committed dates fall in the exact requested interval. This buffer accommodates small timestamp inversions but does not guarantee exhaustive retrieval: the API's lower bound can prune traversal before reaching matching ancestors. Record the strategy and this limitation in report metadata. If buffered bounds fall outside the API's documented supported date range, select full history traversal before querying and record the strategy actually used.
+- Never stop commit pagination merely because an encountered commit or page has an old date. Update uses full history as a fallback for unsupported filter dates; `collect_history` always requests unfiltered history.
 - Read authentication from `GH_TOKEN`, falling back to `GITHUB_TOKEN`. Support GitHub.com repositories accessible to the credential.
 - Use request timeouts, bounded retries, rate-limit handling, and smaller pages for oversized queries. HTTP or GraphQL errors that prevent completion of the selected collection strategy fail the run; accepted coverage limitations do not excuse request failures or incomplete pagination.
 - Write to a temporary file, validate, then atomically replace the requested month. Leave other monthly files untouched. Refuse an output directory containing reports for a different repository node ID.
 - History-first backfill uses one client and repository lookup, checks destination repository identity before traversal, then collects every accessible parent/nested connection and unfiltered default-head commit history once. Normalize and deduplicate stable activities using the existing attribution and publication rules. Capture repository creation time in the lookup.
-- History-mode parent queries embed first lifecycle/comment pages and PR review/thread pages; threads embed first inline-comment pages. Use independent `pageInfo` and resume cursors for every overflowing connection, including comments on later thread pages. Bound nested fan-out with 20 parents, 20 activity items, and 10 threads per page; use lean continuation queries except for thread pages, which retain embedded comment pages. Standalone single-month Python queries remain unchanged.
+- History-mode parent queries embed first lifecycle/comment pages and PR review/thread pages; threads embed first inline-comment pages. Use independent `pageInfo` and resume cursors for every overflowing connection, including comments on later thread pages. Bound nested fan-out with 20 parents, 20 activity items, and 10 threads per page; use lean continuation queries except for thread pages, which retain embedded comment pages. Metadata-only parent queries and separate first-page collection are removed.
 - `RepositoryHistory` is a frozen in-memory snapshot containing repository identity/creation time, captured head, collection interval, limitations, actors, and activities. Offline grouping uses UTC occurrence months, includes all referenced actors (including contextual authors and committers), and builds validated reports with shared snapshot metadata and both strategies `full`. Future output months are rejected relative to collection start; future source timestamps can remain in the snapshot.
 - Validate the destination once per backfill and all selected history-mode reports before replacing any file. Collection/grouping failures leave existing files untouched; writing failures preserve completed months. Keep per-file atomic replacement. Standalone writes retain full destination checks.
 - Log collection duration, request attempts/retries, measured REST/GraphQL cost and unmeasured attempts, plus history grouping/writing time, including failures. Persistent storage, resume, batching, and concurrency remain deferred.
@@ -120,7 +122,7 @@ Document these limitations:
 - Renames preserve repository and actor identity through node IDs; historical display names are not reconstructed.
 - Titles and review states reflect collection-time metadata unless supported by a historical event.
 - Force-pushes, rebases, changed default branches, and newly available data may revise a month when it is rerun.
-- Buffered commit collection may miss in-period ancestors hidden behind commits dated before the buffered lower bound. Local clock errors and unusual or rewritten timestamps can exceed the one-day buffer. Counts are suitable for trend reporting, not an exhaustive audit. Full issue/PR parent discovery in single-month collection does not change the buffered commit query. History-first collection has no date filters and does not carry the bounded-history warning.
+- Buffered commit collection may miss in-period ancestors hidden behind commits dated before the buffered lower bound. Local clock errors and unusual or rewritten timestamps can exceed the one-day buffer. Counts are suitable for trend reporting, not an exhaustive audit. History-first collection has no date filters and does not carry the bounded-history warning.
 - Empty repositories have zero commit activity; disabled issues do not prevent PR collection.
 - Preserve null actors and reasons. For inline comments missing publication timestamps, fall back to creation time only when publication is otherwise confirmed, recording the fallback.
 - Collection is not a transactional GitHub snapshot; concurrent changes may appear on a later rerun.
@@ -137,11 +139,11 @@ Persistent caching, incremental synchronization, and scheduling are deferred. Th
 
 4. **Monthly comments and reviews.** Collect conversation comments, submitted reviews, inline comments, and replies. Test nested pagination, old closed parents, draft exclusion, dismissed reviews, publication timestamps, and double-count prevention.
 
-5. **Monthly commit collection.** Collect captured default-branch history with buffered date bounds in either parent-discovery mode, attributing commits to authors/co-authors. Record the strategy and coverage limitations. Test merge commits, unresolved identities, duplicate authors, exact month filtering, small timestamp inversions within the buffer, documented omissions beyond the buffer, unbounded fallback across non-monotonic dates, unsupported filter dates, and empty repositories.
+5. **Monthly commit collection.** Collect captured default-branch history with buffered date bounds for updates and unfiltered history for backfills, attributing commits to authors/co-authors. Record the strategy and coverage limitations. Test merge commits, unresolved identities, duplicate authors, exact month filtering, small timestamp inversions within the buffer, documented omissions beyond the buffer, unbounded fallback across non-monotonic dates, unsupported filter dates, and empty repositories.
 
 6. **Reports and CLI.** Implement monthly summaries, schema validation, atomic writing, explicit backfill/update commands, and offline summarization. Test UTC boundaries, leap years, empty months, ongoing months, isolated monthly runs, reruns that leave other files untouched, and backfill failures.
 
-7. **End-to-end validation and documentation.** Verify packaged schema availability and documented library/CLI usage. Use a multi-month mocked history to prove independent monthly runs match backfill results and provide enough information to derive cumulative actor statistics. Add an opt-in live smoke check.
+7. **End-to-end validation and documentation.** Verify packaged schema availability and documented library/CLI usage. Use a multi-month mocked history to prove bounded updates match full-history projections for equivalent retrieved data and provide enough information to derive cumulative actor statistics. Add an opt-in live smoke check.
 
 
 ## Unreleased v1 contract preparation

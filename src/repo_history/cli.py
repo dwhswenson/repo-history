@@ -1,4 +1,4 @@
-"""Command-line backfill, incremental updates, and visualization summaries."""
+"""Command-line backfill, recent-month refreshes, and visualization summaries."""
 
 import argparse
 import logging

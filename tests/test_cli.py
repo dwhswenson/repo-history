@@ -70,7 +70,8 @@ def run(directory, *args):
 def test_update_uses_one_bounded_interval(tmp_path, collector, capsys):
     assert run(tmp_path) == 0
     assert len(collector) == 1
-    assert collector[0][2]["discovery"] == "bounded"
+    assert collector[0][2]["start"] == datetime(2024, 2, 1, tzinfo=timezone.utc)
+    assert collector[0][2]["end"] == datetime(2024, 3, 1, tzinfo=timezone.utc)
     out, err = capsys.readouterr()
     assert out == str(tmp_path / "2024-02.json") + "\n"
     assert "Updating o/r 2024-02 through 2024-02" in err
