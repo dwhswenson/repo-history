@@ -1,12 +1,13 @@
 """Full-history backfill defaults, validation, and replacement."""
 
 import importlib
-from dataclasses import replace
 from datetime import datetime, timezone
 
 import pytest
 
 from repo_history import RepositoryHistory, backfill, report_from_json, report_to_json
+
+from .helpers import replace
 
 module = importlib.import_module("repo_history.backfill")
 NOW = datetime(2025, 1, 1, tzinfo=timezone.utc)
@@ -53,7 +54,19 @@ def test_inclusive_range_and_replacement(tmp_path, collector):
     backfill("o", "r", "2024-02", "2024-02", output_directory=tmp_path)
     assert len(collector) == 2
     assert collector[-1][2]["expected_repository_id"] == "R_example"
-    assert all(p.read_bytes() == value for p, value in before.items())
+    assert all(
+        p.read_bytes() == value for p, value in before.items() if p.stem != "2024-02"
+    )
+    after = report_from_json((tmp_path / "2024-02.json").read_text())
+    original = report_from_json(before[tmp_path / "2024-02.json"].decode())
+    assert after.activities == original.activities
+    assert (
+        after.metadata.provenance.created_by == original.metadata.provenance.created_by
+    )
+    assert (
+        after.metadata.provenance.last_updated_by.run_id
+        != original.metadata.provenance.last_updated_by.run_id
+    )
     assert (
         report_from_json(paths[2].read_text()).metadata.month_end
         - report_from_json(paths[2].read_text()).metadata.month_start

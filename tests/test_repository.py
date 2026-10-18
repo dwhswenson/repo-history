@@ -1,5 +1,7 @@
 """Tests for repo_history.repository."""
 
+from datetime import datetime, timezone
+
 import pytest
 
 import repo_history as api
@@ -25,6 +27,7 @@ def test_repository_lookup(client):
         "main",
         "a" * 40,
         123,
+        datetime(2020, 1, 1, tzinfo=timezone.utc),
     )
     payload = client._session.calls[0][1]["json"]
     assert payload["query"] == REPOSITORY_QUERY

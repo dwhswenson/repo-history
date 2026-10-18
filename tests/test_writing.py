@@ -1,6 +1,5 @@
 """Tests for validated atomic monthly file writing."""
 
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -13,6 +12,8 @@ from repo_history import (
     write_report,
     writing,
 )
+
+from .helpers import replace
 
 
 def test_write_empty_and_rerun_preserves_other_files(tmp_path, empty, mixed):
@@ -39,7 +40,14 @@ def test_write_empty_and_rerun_preserves_other_files(tmp_path, empty, mixed):
         mixed, metadata=replace(mixed.metadata, repository_full_name="new/name")
     )
     write_report(renamed, directory)
-    assert report_from_json(target.read_text()) == renamed
+    saved = report_from_json(target.read_text())
+    assert saved.activities == renamed.activities
+    assert saved.metadata.repository == renamed.metadata.repository
+    assert saved.metadata.provenance.created_by == empty.metadata.provenance.created_by
+    assert (
+        saved.metadata.provenance.last_updated_by
+        == renamed.metadata.provenance.last_updated_by
+    )
     assert other.read_bytes() == original
     assert unrelated.read_text() == "not JSON"
     assert nested.is_dir()

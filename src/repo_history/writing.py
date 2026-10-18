@@ -25,11 +25,27 @@ def _check_directory(directory: Path, repository_id: str | None = None) -> str |
             raise ReportWriteError(f"{path}: invalid existing report: {exc}") from exc
         if report.metadata.month != path.stem:
             raise ReportWriteError(f"{path}: filename does not match report month")
-        observed = report.metadata.repository_node_id
+        observed = report.metadata.repository.node_id
         if repository_id is not None and repository_id != observed:
             raise ReportWriteError(f"{path}: report belongs to a different repository")
         repository_id = observed
     return repository_id
+
+
+def directory_repository(directory):
+    """Read existing repository boundary evidence without relying on a manifest."""
+    from .contracts import choose_repository
+
+    if not directory.exists():
+        return None
+    reports = [
+        report_from_json(p.read_text())
+        for p in sorted(directory.iterdir())
+        if MONTHLY_FILE.fullmatch(p.name) and not p.is_dir()
+    ]
+    return (
+        choose_repository(r.metadata.repository for r in reports) if reports else None
+    )
 
 
 def write_report(report: MonthlyReport, output_directory: str | os.PathLike) -> Path:
@@ -42,14 +58,26 @@ def write_report(report: MonthlyReport, output_directory: str | os.PathLike) -> 
     return _write_report(report, output_directory, check_directory=True)
 
 
-def _write_report(report, output_directory, *, check_directory=False):
+def _write_report(
+    report, output_directory, *, check_directory=False, previous_repository=None
+):
     """Atomic writer for a destination already checked by a sequential backfill."""
-    text = report_to_json(report)
+    report_to_json(report)  # Validate before touching the destination.
     directory = Path(output_directory)
     if check_directory:
-        _check_directory(directory, report.metadata.repository_node_id)
+        _check_directory(directory, report.metadata.repository.node_id)
     directory.mkdir(parents=True, exist_ok=True)
     target = directory / f"{report.metadata.month}.json"
+    from .provenance import retain_provenance
+
+    if check_directory:
+        previous_repository = directory_repository(directory)
+    previous = report_from_json(target.read_text()) if target.exists() else None
+    if previous_repository is None and previous is not None:
+        previous_repository = previous.metadata.repository
+    if previous_repository is not None:
+        report = retain_provenance(report, previous_repository, previous)
+    text = report_to_json(report)
     temporary = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -69,4 +97,8 @@ def _write_report(report, output_directory, *, check_directory=False):
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
+    if check_directory and (directory / "collection-state.json").exists():
+        from .state import write_collection_state
+
+        write_collection_state(directory, report.metadata.provenance.last_updated_by)
     return target

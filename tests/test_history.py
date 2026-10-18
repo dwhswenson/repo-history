@@ -14,7 +14,7 @@ import repo_history as api
 from repo_history import cli, collection
 from repo_history import history as module
 
-from .helpers import Response, Session, errors, repository
+from .helpers import Response, Session, errors, repository, without_run_ids
 from .test_collection import (
     actor,
     comment,
@@ -252,16 +252,18 @@ def test_snapshot_and_offline_months(session):
     )
     for report in reports:
         assert (
-            report.metadata.parent_discovery == report.metadata.commit_history == "full"
+            report.metadata.provenance.last_updated_by.parent_discovery
+            == report.metadata.provenance.last_updated_by.commit_history
+            == "full"
         )
         assert (
-            report.metadata.collection_started_at
-            == report.metadata.collection_finished_at
+            report.metadata.provenance.last_updated_by.started_at
+            == report.metadata.provenance.last_updated_by.finished_at
             == NOW
         )
         assert not any(
             "24-hour" in text or "Experimental" in text
-            for text in report.metadata.coverage_limitations
+            for text in report.metadata.coverage.limitations
         )
         assert api.report_from_json(api.report_to_json(report)) == report
     assert "U_committer" in {a.key for a in reports[0].actors}
@@ -386,7 +388,7 @@ def test_collection_failure_keeps_existing_files(session, tmp_path, failure, cap
             "o", "r", "2024-01", "2024-03", output_directory=tmp_path, token="test"
         )
     assert original.read_bytes() == before
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["2024-02.json"]
+    assert sorted(p.name for p in tmp_path.glob("[0-9]*.json")) == ["2024-02.json"]
     assert session.closed and "History collection status=failed" in caplog.text
 
 
@@ -415,10 +417,10 @@ def test_destination_scanned_once_and_writing_failure_preserves_completed(
     )
     writer = backfill_module._write_report
 
-    def fail_second(report, directory):
+    def fail_second(report, directory, **kwargs):
         if report.metadata.month == "2024-02":
             raise OSError("disk full")
-        return writer(report, directory)
+        return writer(report, directory, **kwargs)
 
     monkeypatch.setattr(backfill_module, "_write_report", fail_second)
     written = []
@@ -494,7 +496,7 @@ def test_cli_history_default_and_discovery_error(
         )
         == 0
     )
-    assert sorted(p.name for p in tmp_path.iterdir()) == [
+    assert sorted(p.name for p in tmp_path.glob("[0-9]*.json")) == [
         "2024-02.json",
         "2024-03.json",
     ]
@@ -779,7 +781,9 @@ def test_progress_preserves_reports_and_request_counts(session, tmp_path):
             output_directory=tmp_path / "progress",
             token="test",
         )
-    assert [path.read_bytes() for path in paths] == before
+    assert [without_run_ids(path.read_bytes()) for path in paths] == [
+        without_run_ids(raw) for raw in before
+    ]
     assert len(session.calls) == request_count
     assert [(e.kind, e.stage) for e in events if e.kind in ("start", "complete")] == [
         ("start", "Issues"),

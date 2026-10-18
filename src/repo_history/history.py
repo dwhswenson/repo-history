@@ -2,6 +2,7 @@
 
 import logging
 from collections import defaultdict
+from dataclasses import replace
 from datetime import datetime, timezone
 from time import perf_counter
 
@@ -10,7 +11,8 @@ from .collection import COVERAGE_LIMITATIONS, _collect_parent, _month_bounds, _R
 from .commits import BOUNDED_LIMITATION, collect_commits
 from .discovery import BOUNDED_DISCOVERY_LIMITATION, discover_parents, select_strategy
 from .errors import GraphQLError, ReportWriteError
-from .models import CommitMetadata, MonthlyReport, ReportMetadata, RepositoryHistory
+from .models import CommitMetadata, MonthlyReport, RepositoryHistory
+from .provenance import make_run, report_metadata
 from .reports import build_report
 from .repository import lookup_repository
 from .transport import GraphQLClient
@@ -130,6 +132,18 @@ def _collect_snapshot(
                 ),
             )
             completed = True
+            result = replace(
+                result,
+                run=make_run(
+                    "collect_history",
+                    started,
+                    result.collection_finished_at,
+                    since=start,
+                    until=end,
+                    parents=discovery,
+                    commits=commit_strategy,
+                ),
+            )
             return result, discovery, commit_strategy
         finally:
             rest, graphql = client._api_usage["rest"], client._api_usage["graphql"]
@@ -171,6 +185,17 @@ def _history_to_months(
 
     if not isinstance(history, RepositoryHistory):
         raise ValueError("history must be a RepositoryHistory")
+    if history.run is None:
+        history = replace(
+            history,
+            run=make_run(
+                "manual",
+                history.collection_started_at,
+                history.collection_finished_at,
+                parents=parent_discovery,
+                commits=commit_history,
+            ),
+        )
     earliest = min(
         (activity.occurred_at for activity in history.activities),
         default=history.repository_created_at,
@@ -199,21 +224,16 @@ def _history_to_months(
             referenced.update(credit.actor_key for credit in activity.credits)
             if isinstance(activity.metadata, CommitMetadata):
                 referenced.add(activity.metadata.committer.actor_key)
-        metadata = ReportMetadata(
-            repository_node_id=history.repository_node_id,
-            repository_full_name=history.repository_full_name,
-            repository_url=history.repository_url,
-            month=f"{year:04d}-{month:02d}",
-            month_start=first,
-            month_end=after,
-            collection_started_at=history.collection_started_at,
-            collection_finished_at=history.collection_finished_at,
-            ongoing=first <= started < after,
-            default_branch=history.default_branch,
-            default_branch_head=history.default_branch_head,
-            coverage_limitations=history.coverage_limitations,
-            parent_discovery=parent_discovery,
-            commit_history=commit_history,
+        metadata = report_metadata(
+            history,
+            f"{year:04d}-{month:02d}",
+            first,
+            after,
+            history_start=f"{earliest.year:04d}-{earliest.month:02d}"
+            if parent_discovery == commit_history == "full"
+            else None,
+            parents=parent_discovery,
+            commits=commit_history,
         )
         reports.append(
             build_report(

@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:repo-history-tracking:collection-state:1",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "repository": {
+      "$ref": "urn:repo-history-tracking:common:1#/$defs/repository"
+    },
+    "last_applied_run": {
+      "$ref": "urn:repo-history-tracking:common:1#/$defs/collection_run"
+    },
+    "reports": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      }
+    },
+    "checkpoint": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "baseline_run": {
+              "$ref": "urn:repo-history-tracking:common:1#/$defs/collection_run"
+            },
+            "report_start_month": {
+              "type": "string",
+              "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$"
+            },
+            "report_end_month": {
+              "type": "string",
+              "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$"
+            },
+            "issues": {
+              "type": "object",
+              "properties": {
+                "checked_through": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "Z$"
+                },
+                "last_full_scan_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "Z$"
+                }
+              },
+              "required": [
+                "checked_through",
+                "last_full_scan_at"
+              ],
+              "additionalProperties": false
+            },
+            "pull_requests": {
+              "type": "object",
+              "properties": {
+                "checked_through": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "Z$"
+                },
+                "last_full_scan_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "Z$"
+                }
+              },
+              "required": [
+                "checked_through",
+                "last_full_scan_at"
+              ],
+              "additionalProperties": false
+            },
+            "commits": {
+              "type": "object",
+              "properties": {
+                "checked_through": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "Z$"
+                },
+                "default_branch": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "default_branch_head": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{40}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "checked_through",
+                "default_branch",
+                "default_branch_head"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "baseline_run",
+            "report_start_month",
+            "report_end_month",
+            "issues",
+            "pull_requests",
+            "commits"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "repository",
+    "last_applied_run",
+    "reports",
+    "checkpoint"
+  ],
+  "additionalProperties": false,
+  "description": "One current state per repository dataset, published after successful monthly writes. A checkpoint is usable only when its exact-byte report inventory matches disk. Null checkpoint explicitly means no resumable baseline."
+}

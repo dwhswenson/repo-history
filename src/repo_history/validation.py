@@ -2,12 +2,10 @@
 
 import json
 from dataclasses import asdict
-from datetime import datetime, timezone
 from functools import lru_cache
 from importlib.resources import files
 
-from jsonschema import Draft202012Validator, FormatChecker
-
+from .contracts import contract_validator, schema_validator, validate_metadata
 from .errors import ReportValidationError
 from .identities import git_identity_key
 from .models import METADATA_CLASSES, MonthlyReport
@@ -16,10 +14,8 @@ from .summaries import derive_summaries
 
 
 @lru_cache(maxsize=1)
-def _validator() -> Draft202012Validator:
-    schema = load_schema()
-    Draft202012Validator.check_schema(schema)
-    return Draft202012Validator(schema, format_checker=FormatChecker())
+def _validator():
+    return contract_validator("monthly-report")
 
 
 def load_schema() -> dict:
@@ -51,9 +47,7 @@ def validate_data(data: dict, *, check_summaries: bool = True) -> None:
                     "$ref": f"#/$defs/{kind}_activity",
                 }
                 detail = next(
-                    Draft202012Validator(
-                        branch, format_checker=FormatChecker()
-                    ).iter_errors(error.instance),
+                    schema_validator(branch).iter_errors(error.instance),
                     None,
                 )
                 if detail is not None:
@@ -91,36 +85,15 @@ def validate_report(report: MonthlyReport) -> None:
 def _validate_semantics(report: MonthlyReport, *, check_summaries: bool) -> None:
     m = report.metadata
     path = "$.metadata"
-    year, month = map(int, m.month.split("-"))
-    try:
-        start = datetime(year, month, 1, tzinfo=timezone.utc)
-        end = datetime(year + (month == 12), month % 12 + 1, 1, tzinfo=timezone.utc)
-    except ValueError as exc:
-        raise ReportValidationError(
-            path + ".month", "unsupported calendar month"
-        ) from exc
-    _require(
-        m.month_start == start, path + ".month_start", "must be exact UTC month start"
-    )
-    _require(
-        m.month_end == end, path + ".month_end", "must be exact next UTC month start"
-    )
-    _require(
-        m.collection_started_at <= m.collection_finished_at,
-        path + ".collection_finished_at",
-        "collection interval is reversed",
-    )
-    _require(start <= m.collection_started_at, path + ".month", "future month")
-    _require(
-        m.ongoing == (start <= m.collection_started_at < end),
-        path + ".ongoing",
-        "must reflect month at collection start",
-    )
-    _require(
-        (m.default_branch is None) == (m.default_branch_head is None),
-        path + ".default_branch_head",
-        "branch and head must both be present or null",
-    )
+    validate_metadata(to_data(m), path, {})
+    start, end = m.month_start, m.month_end
+    if (
+        m.repository.history_start_month is not None
+        and m.month < m.repository.history_start_month
+    ):
+        _require(
+            not report.activities, path, "activity precedes established history start"
+        )
     registry = {}
     for i, actor in enumerate(report.actors):
         p = f"$.actors[{i}]"
@@ -197,7 +170,7 @@ def _validate_semantics(report: MonthlyReport, *, check_summaries: bool) -> None
             )
         details = activity.metadata
         if kind == "commit":
-            expected_id = f"commit:{m.repository_node_id}:{details.sha}"
+            expected_id = f"commit:{m.repository.node_id}:{details.sha}"
             reference(details.committer.actor_key, p + ".metadata.committer.actor_key")
             _require(
                 any(

@@ -22,7 +22,9 @@ from .models import (
     ACTIVITY_TYPES,
     Activity,
     Actor,
+    CollectionRun,
     CommitMetadata,
+    Coverage,
     Credit,
     GitIdentity,
     IssueClosedMetadata,
@@ -36,20 +38,29 @@ from .models import (
     PRInlineReviewCommentMetadata,
     PRMergedMetadata,
     PROpenedMetadata,
+    Provenance,
     PRReviewMetadata,
     ReportMetadata,
     RepositoryHistory,
+    RepositoryMetadata,
     Subject,
 )
 from .reports import build_report
 from .repository import RepositorySnapshot, lookup_repository
 from .serialization import report_from_json, report_to_json
+from .state import load_collection_state_schema, validate_collection_state
 from .summaries import derive_summaries
 from .transport import GraphQLClient
 from .validation import load_schema, validate_report
 from .writing import write_report
 
 __all__ = [
+    "CollectionRun",
+    "RepositoryMetadata",
+    "Provenance",
+    "Coverage",
+    "load_collection_state_schema",
+    "validate_collection_state",
     "build_manifest",
     "write_manifest",
     "collect_history",

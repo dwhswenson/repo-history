@@ -1,6 +1,5 @@
 """Tests for repo_history.summaries."""
 
-from dataclasses import replace
 from pathlib import Path
 
 from repo_history import (
@@ -8,6 +7,8 @@ from repo_history import (
     build_report,
     validate_report,
 )
+
+from .helpers import replace
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

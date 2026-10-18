@@ -1,7 +1,6 @@
 """Offline producer, shared schema, and atomic publication tests."""
 
 import json
-from dataclasses import replace
 from importlib.resources import files
 from pathlib import Path
 
@@ -18,12 +17,27 @@ from repo_history import (
 )
 from repo_history.cli import main
 
+from .helpers import replace
+
 
 def later(report, month="2024-03"):
     text = (
         report_to_json(report).replace("2024-03", "2024-04").replace("2024-02", month)
     )
-    return report_from_json(text)
+    import json
+    from uuid import NAMESPACE_URL, uuid5
+
+    data = json.loads(text)
+    for run in data["metadata"]["provenance"].values():
+        run["run_id"] = str(
+            uuid5(
+                NAMESPACE_URL,
+                json.dumps(
+                    {k: v for k, v in run.items() if k != "run_id"}, sort_keys=True
+                ),
+            )
+        )
+    return report_from_json(json.dumps(data))
 
 
 def test_shared_fixture_and_projection(mixed, empty):
@@ -53,7 +67,7 @@ def test_sort_rename_and_determinism(tmp_path, mixed):
     )
     data = build_manifest([second, mixed])
     assert [m["metadata"]["month"] for m in data["months"]] == ["2024-02", "2024-03"]
-    assert data["repository"]["full_name"] == "new/name"
+    assert data["repositories"][0]["full_name"] == "new/name"
     for report in (mixed, second):
         (tmp_path / f"{report.metadata.month}.json").write_text(report_to_json(report))
     original = {p.name: p.read_bytes() for p in tmp_path.iterdir()}
@@ -84,9 +98,9 @@ def test_sort_rename_and_determinism(tmp_path, mixed):
             )
         )
     )
-    assert json.loads(write_manifest(tmp_path).read_text())["months"][0]["metadata"][
-        "coverage_limitations"
-    ] == ["new note"]
+    assert json.loads(write_manifest(tmp_path).read_text())["months"][0][
+        "source_reports"
+    ][0]["metadata"]["coverage"]["limitations"] == ["new note"]
 
 
 def test_invalid_sources(tmp_path, mixed, empty):

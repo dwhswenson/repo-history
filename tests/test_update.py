@@ -2,7 +2,7 @@
 
 from collections import Counter
 from copy import deepcopy
-from dataclasses import replace
+from datetime import datetime, timezone
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -11,7 +11,7 @@ import repo_history as api
 from repo_history import cli, history, update
 
 from . import test_history
-from .helpers import Response, repository
+from .helpers import Response, replace, repository
 from .test_collection import comment, connection, parent
 from .test_discovery import hydrated, rest_parent
 from .test_history import NOW
@@ -101,6 +101,11 @@ def seed(directory, empty, month="2024-02", repository_id="R_example"):
             collection_finished_at=NOW,
             ongoing=start <= NOW < end,
             repository_node_id=repository_id,
+            repository=replace(
+                empty.metadata.repository,
+                node_id=repository_id,
+                created_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+            ),
         ),
     )
     directory.mkdir(parents=True, exist_ok=True)
@@ -151,13 +156,17 @@ def test_no_reports_falls_back_to_history(session, tmp_path, destination):
     assert run(directory, "--end", "2024-02") == 0
     assert (directory / "2023-12.json").exists()  # imported commit before creation
     report = api.report_from_json((directory / "2024-02.json").read_text())
-    assert report.metadata.parent_discovery == report.metadata.commit_history == "full"
+    assert (
+        report.metadata.provenance.last_updated_by.parent_discovery
+        == report.metadata.provenance.last_updated_by.commit_history
+        == "full"
+    )
     assert all("since" not in p["variables"] for p in requests(session))
 
 
 def test_explicit_start_empty_directory_uses_range(session, tmp_path):
     assert run(tmp_path, "--start", "2024-02", "--end", "2024-03") == 0
-    assert sorted(p.name for p in tmp_path.iterdir()) == [
+    assert sorted(p.name for p in tmp_path.glob("[0-9]*.json")) == [
         "2024-02.json",
         "2024-03.json",
     ]
@@ -202,8 +211,8 @@ def test_range_matches_independent_months(session, tmp_path):
         assert grouped.activities == monthly.activities
         assert grouped.actors == monthly.actors
         assert grouped.summaries == monthly.summaries
-        assert grouped.metadata.parent_discovery == "bounded"
-        assert grouped.metadata.commit_history == "bounded"
+        assert grouped.metadata.provenance.last_updated_by.parent_discovery == "bounded"
+        assert grouped.metadata.provenance.last_updated_by.commit_history == "bounded"
 
 
 @pytest.mark.parametrize("failure", ["collection", "projection", "writing"])
@@ -226,7 +235,7 @@ def test_failure_preservation(session, tmp_path, empty, monkeypatch, failure, ca
     else:
         writer = update._write_report
 
-        def fail(report, directory):
+        def fail(report, directory, **kwargs):
             if report.metadata.month == "2024-03":
                 raise OSError("disk full")
             return writer(report, directory)
@@ -314,11 +323,11 @@ def test_bounded_range_one_discovery_and_monthly_equivalence(
         assert grouped.activities == monthly.activities
         assert grouped.summaries == monthly.summaries
         assert (
-            grouped.metadata.parent_discovery
-            == grouped.metadata.commit_history
+            grouped.metadata.provenance.last_updated_by.parent_discovery
+            == grouped.metadata.provenance.last_updated_by.commit_history
             == "bounded"
         )
-        assert any("Experimental" in x for x in grouped.metadata.coverage_limitations)
+        assert any("Experimental" in x for x in grouped.metadata.coverage.limitations)
 
 
 def test_range_strategy_fallbacks_record_actual_provenance(session, tmp_path):
@@ -327,11 +336,13 @@ def test_range_strategy_fallbacks_record_actual_provenance(session, tmp_path):
         report = api.report_from_json((tmp_path / f"{name}.json").read_text())
         assert not report.activities
         assert (
-            report.metadata.parent_discovery == report.metadata.commit_history == "full"
+            report.metadata.provenance.last_updated_by.parent_discovery
+            == report.metadata.provenance.last_updated_by.commit_history
+            == "full"
         )
         assert not any(
             "Experimental" in x or "24-hour" in x
-            for x in report.metadata.coverage_limitations
+            for x in report.metadata.coverage.limitations
         )
     assert not any("since" in p["variables"] for p in requests(session))
 

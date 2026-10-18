@@ -4,133 +4,189 @@ import json
 import os
 import tempfile
 from collections.abc import Iterable
-from datetime import datetime, timezone
-from functools import lru_cache
-from importlib.resources import files
 from pathlib import Path
-
-from jsonschema import Draft202012Validator, FormatChecker
 
 from ._progress import emit
 from .errors import ReportValidationError, ReportWriteError
 from .models import ACTIVITY_TYPES, MonthlyReport
-from .serialization import parse_time, report_from_json, to_data
+from .serialization import report_from_json, to_data
 from .validation import validate_report
 from .writing import MONTHLY_FILE
 
-METADATA_KEYS = (
-    "month",
-    "month_start",
-    "month_end",
-    "collection_started_at",
-    "collection_finished_at",
-    "ongoing",
-    "coverage_limitations",
-)
+METADATA_KEYS = ("month", "month_start", "month_end", "ongoing")
 CLASSES = ("human", "bot", "unresolved_git")
 
 
-@lru_cache(maxsize=1)
-def _validator():
-    schema = json.loads(
-        files("repo_history").joinpath("schemas/viz-manifest-v1.json").read_text()
+def _population(keys, actors):
+    return {
+        "total": len(keys),
+        **{c: sum(actors[k] == c for k in keys) for c in CLASSES},
+    }
+
+
+def _validate_summary(summary, actors, path):
+    from .contracts import require
+
+    counts = summary["actor_counts"]
+    for key, values in counts.items():
+        require(key in actors, path, f"unknown actor {key}")
+        require(any(values.values()), path, f"actor {key} has no participation")
+    require(
+        summary["distinct_actors"] == _population(set(counts), actors),
+        path,
+        "distinct actor population disagrees with actor counts",
     )
-    Draft202012Validator.check_schema(schema)
-    return Draft202012Validator(schema, format_checker=FormatChecker())
+    require(
+        summary["unattributed_total"] == sum(summary["unattributed_by_type"].values()),
+        path,
+        "unattributed total disagrees with type counts",
+    )
+    for kind in ACTIVITY_TYPES:
+        keys = {k for k, v in counts.items() if v[kind] > 0}
+        require(
+            summary["distinct_actors_by_type"][kind] == _population(keys, actors),
+            path,
+            f"{kind} population disagrees with actor counts",
+        )
+        total, unattributed = (
+            summary["repository_counts"][kind],
+            summary["unattributed_by_type"][kind],
+        )
+        require(
+            unattributed <= total and all(v[kind] <= total for v in counts.values()),
+            path,
+            f"{kind} attribution exceeds repository count",
+        )
+        attributed = sum(v[kind] for v in counts.values())
+        require(
+            (attributed >= total - unattributed)
+            if kind == "commit"
+            else attributed + unattributed == total,
+            path,
+            f"{kind} repository count disagrees with attribution",
+        )
+
+
+def _sum_summaries(summaries, actors):
+    """Expected chart summary for validation, never a manifest-combining API."""
+    counts = dict.fromkeys(ACTIVITY_TYPES, 0)
+    unattributed = counts.copy()
+    per_actor = {}
+    for summary in summaries:
+        for kind in ACTIVITY_TYPES:
+            counts[kind] += summary["repository_counts"][kind]
+            unattributed[kind] += summary["unattributed_by_type"][kind]
+        for key, values in summary["actor_counts"].items():
+            target = per_actor.setdefault(key, dict.fromkeys(ACTIVITY_TYPES, 0))
+            for kind in ACTIVITY_TYPES:
+                target[kind] += values[kind]
+    return {
+        "repository_counts": counts,
+        "actor_counts": per_actor,
+        "distinct_actors": _population(set(per_actor), actors),
+        "distinct_actors_by_type": {
+            kind: _population({k for k, v in per_actor.items() if v[kind]}, actors)
+            for kind in ACTIVITY_TYPES
+        },
+        "unattributed_total": sum(unattributed.values()),
+        "unattributed_by_type": unattributed,
+    }
 
 
 def validate_manifest(data: dict) -> None:
-    """Validate structure and every invariant recoverable from summaries."""
+    """Validate sources, coverage, and the prepared aggregate chart summaries."""
+    from .contracts import (
+        require,
+        validate_calendar,
+        validate_metadata,
+        validate_repository,
+        validate_structure,
+    )
 
-    def require(condition, path, message):
-        if not condition:
-            raise ReportValidationError(path, message)
-
-    error = next(_validator().iter_errors(data), None)
-    if error is not None:
-        raise ReportValidationError(
-            "$"
-            + "".join(f"[{p}]" if isinstance(p, int) else f".{p}" for p in error.path),
-            error.message,
-        )
-    seen = set()
-    used = set()
+    validate_structure("viz-manifest", data)
+    runs, repositories, source_repositories = {}, {}, {}
+    for repo in data["repositories"]:
+        key = repo["node_id"]
+        require(key not in repositories, "$.repositories", "duplicate repository")
+        validate_repository(repo, "$.repositories", runs)
+        repositories[key] = repo
+        source_repositories[key] = []
+    seen, used = set(), set()
     for i, entry in enumerate(data["months"]):
         path = f"$.months[{i}]"
-        m, s = entry["metadata"], entry["summaries"]
+        m = entry["metadata"]
         require(m["month"] not in seen, path, "duplicate month")
         seen.add(m["month"])
-        year, month = map(int, m["month"].split("-"))
-        try:
-            start = datetime(year, month, 1, tzinfo=timezone.utc)
-            end = datetime(year + (month == 12), month % 12 + 1, 1, tzinfo=timezone.utc)
-        except ValueError as exc:
-            raise ReportValidationError(path, "unsupported calendar month") from exc
+        validate_calendar(m, path)
+        present = set()
+        for source in entry["source_reports"]:
+            meta = source["metadata"]
+            key = meta["repository"]["node_id"]
+            require(key in repositories, path, "unknown source repository")
+            require(key not in present, path, "duplicate repository source report")
+            present.add(key)
+            validate_metadata(meta, path + ".source_reports", runs)
+            source_repositories[key].append(meta["repository"])
+            require(
+                all(meta[k] == m[k] for k in ("month", "month_start", "month_end")),
+                path,
+                "source month disagrees with aggregate month",
+            )
+            require(
+                meta["repository"]["created_at"] == repositories[key]["created_at"],
+                path,
+                "conflicting repository creation timestamp",
+            )
+            boundary = meta["repository"]["history_start_month"]
+            require(
+                boundary is None
+                or meta["month"] >= boundary
+                or not any(source["summaries"]["repository_counts"].values()),
+                path,
+                "activity precedes established history start",
+            )
+            _validate_summary(source["summaries"], data["actors"], path)
+            used.update(source["summaries"]["actor_counts"])
+        if len(repositories) > 1:
+            for key, repo in repositories.items():
+                if key not in present:
+                    require(
+                        repo["history_start_month"] is not None
+                        and m["month"] < repo["history_start_month"],
+                        path,
+                        f"missing report for {key} in {m['month']}",
+                    )
         require(
-            parse_time(m["month_start"]) == start and parse_time(m["month_end"]) == end,
+            m["ongoing"]
+            == any(s["metadata"]["ongoing"] for s in entry["source_reports"]),
             path,
-            "month boundaries must match reporting month in UTC",
+            "ongoing disagrees with sources",
         )
-        collected, finished = (
-            parse_time(m["collection_started_at"]),
-            parse_time(m["collection_finished_at"]),
-        )
-        require(start <= collected <= finished, path, "invalid collection interval")
+        _validate_summary(entry["summaries"], data["actors"], path)
         require(
-            m["ongoing"] == (start <= collected < end),
+            entry["summaries"]
+            == _sum_summaries(
+                [s["summaries"] for s in entry["source_reports"]], data["actors"]
+            ),
             path,
-            "ongoing must reflect collection start",
+            "aggregate summary disagrees with source reports",
         )
-        counts = s["actor_counts"]
-        for key, values in counts.items():
-            require(key in data["actors"], path, f"unknown actor {key}")
-            require(any(values.values()), path, f"actor {key} has no participation")
-            used.add(key)
+    if len(repositories) > 1:
+        month = min(seen)
+        while month <= max(seen):
+            require(month in seen, "$.months", f"missing aggregate month {month}")
+            from .contracts import month_bounds
 
-        def population(keys):
-            return {
-                "total": len(keys),
-                **{c: sum(data["actors"][key] == c for key in keys) for c in CLASSES},
-            }
-
-        require(
-            s["distinct_actors"] == population(set(counts)),
-            path,
-            "distinct actor population disagrees with actor counts",
-        )
-        require(
-            s["unattributed_total"] == sum(s["unattributed_by_type"].values()),
-            path,
-            "unattributed total disagrees with type counts",
-        )
-        for kind in ACTIVITY_TYPES:
-            keys = {key for key, values in counts.items() if values[kind] > 0}
+            month = month_bounds(month)[1].strftime("%Y-%m")
+    for key, sources in source_repositories.items():
+        known = [r for r in sources if r["history_start_month"] is not None]
+        if known:
+            earliest = min(known, key=lambda r: r["history_start_month"])
             require(
-                s["distinct_actors_by_type"][kind] == population(keys),
-                path,
-                f"{kind} population disagrees with actor counts",
-            )
-            total, unattributed = (
-                s["repository_counts"][kind],
-                s["unattributed_by_type"][kind],
-            )
-            require(
-                unattributed <= total,
-                path,
-                f"{kind} unattributed exceeds repository count",
-            )
-            require(
-                all(values[kind] <= total for values in counts.values()),
-                path,
-                f"{kind} actor count exceeds repository count",
-            )
-            attributed = sum(values[kind] for values in counts.values())
-            require(
-                (attributed >= total - unattributed)
-                if kind == "commit"
-                else (attributed + unattributed == total),
-                path,
-                f"{kind} repository count disagrees with attribution",
+                repositories[key]["history_start_month"]
+                == earliest["history_start_month"],
+                "$.repositories",
+                "registry must retain earliest source history boundary",
             )
     require(
         used == set(data["actors"]),
@@ -139,21 +195,29 @@ def validate_manifest(data: dict) -> None:
     )
 
 
-def build_manifest(reports: Iterable[MonthlyReport]) -> dict:
+def build_manifest(
+    reports: Iterable[MonthlyReport], *, display_name: str | None = None
+) -> dict:
     """Validate full reports sequentially and retain only visualization data."""
-    return _build_manifest(reports, check_reports=True)
+    return _build_manifest(reports, check_reports=True, display_name=display_name)
 
 
-def _build_manifest(reports: Iterable[MonthlyReport], *, check_reports: bool) -> dict:
+def _build_manifest(
+    reports: Iterable[MonthlyReport],
+    *,
+    check_reports: bool,
+    display_name: str | None = None,
+) -> dict:
     actors, months, repository_id, latest = {}, [], None, None
+    repository_metadata = []
     seen = set()
     for report in reports:
         if check_reports:
             validate_report(report)
         m = report.metadata
-        if repository_id is not None and repository_id != m.repository_node_id:
+        if repository_id is not None and repository_id != m.repository.node_id:
             raise ReportWriteError("all reports must belong to the same repository")
-        repository_id = m.repository_node_id
+        repository_id = m.repository.node_id
         if m.month in seen:
             raise ReportWriteError(f"duplicate month {m.month}")
         seen.add(m.month)
@@ -164,23 +228,29 @@ def _build_manifest(reports: Iterable[MonthlyReport], *, check_reports: bool) ->
                 raise ReportWriteError(f"conflicting classifications for actor {key}")
             actors[key] = classification
         metadata = to_data(m)
+        repository_metadata.append((m.month, m.repository))
         months.append(
             {
                 "metadata": {key: metadata[key] for key in METADATA_KEYS},
                 "summaries": to_data(report.summaries),
+                "source_reports": [
+                    {"metadata": metadata, "summaries": to_data(report.summaries)}
+                ],
             }
         )
         if latest is None or m.month > latest.month:
             latest = m
     if latest is None:
         raise ReportWriteError("no monthly reports found")
+    from .contracts import choose_repository
+
+    repository = choose_repository(
+        r for _, r in sorted(repository_metadata, key=lambda x: x[0])
+    )
     data = {
         "schema_version": "1",
-        "repository": {
-            "node_id": latest.repository_node_id,
-            "full_name": latest.repository_full_name,
-            "url": latest.repository_url,
-        },
+        "display_name": repository.full_name if display_name is None else display_name,
+        "repositories": [to_data(repository)],
         "actors": dict(sorted(actors.items())),
         "months": sorted(months, key=lambda item: item["metadata"]["month"]),
     }
@@ -189,7 +259,10 @@ def _build_manifest(reports: Iterable[MonthlyReport], *, check_reports: bool) ->
 
 
 def write_manifest(
-    report_directory: str | os.PathLike, *, output_path: str | os.PathLike | None = None
+    report_directory: str | os.PathLike,
+    *,
+    output_path: str | os.PathLike | None = None,
+    display_name: str | None = None,
 ) -> Path:
     """Rebuild an atomic manifest; source reports must not change concurrently."""
     directory = Path(report_directory)
@@ -224,7 +297,7 @@ def write_manifest(
         emit("detail", detail="Validating assembled manifest")
 
     # report_from_json has already performed full event and summary validation.
-    data = _build_manifest(reports(), check_reports=False)
+    data = _build_manifest(reports(), check_reports=False, display_name=display_name)
     emit("complete", stage="Reports", detail=f"Summarized {len(paths)} monthly reports")
     emit("phase", stage="Manifest", detail=f"Saving {target.name}")
     text = (

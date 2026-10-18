@@ -142,3 +142,17 @@ Persistent caching, incremental synchronization, and scheduling are deferred. Th
 6. **Reports and CLI.** Implement monthly summaries, schema validation, atomic writing, explicit backfill/update commands, and offline summarization. Test UTC boundaries, leap years, empty months, ongoing months, isolated monthly runs, reruns that leave other files untouched, and backfill failures.
 
 7. **End-to-end validation and documentation.** Verify packaged schema availability and documented library/CLI usage. Use a multi-month mocked history to prove independent monthly runs match backfill results and provide enough information to derive cumulative actor statistics. Add an opt-in live smoke check.
+
+
+## Unreleased v1 contract preparation
+
+The implemented contracts in `src/repo_history/schemas/` are authoritative.
+Monthly reports now nest repository creation/history evidence, three bounded
+provenance descriptors, and coverage observation metadata. Visualization manifests
+retain source summaries alongside prepared aggregates and support a display name
+and repository registry. Repository-wide `collection-state.json` binds checkpoints
+to exact monthly report hashes; only fully materialized full-history backfills
+currently establish resumable checkpoints. See README sections “JSON contract
+version 1”, “Repository collection state”, and “Prepared multi-repository manifests”
+for field semantics. There is no backward compatibility, schema version bump,
+manifest-combining command, or incremental updater in this revision.

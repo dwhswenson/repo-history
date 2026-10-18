@@ -1,7 +1,6 @@
 """Offline commit collection through the real transport and report builder."""
 
 from copy import deepcopy
-from dataclasses import replace
 from datetime import datetime, timezone
 
 import pytest
@@ -11,7 +10,7 @@ from repo_history import collection
 from repo_history.commits import history_bounds
 from repo_history.identities import git_identity_key
 
-from .helpers import Response, Session, errors, repository
+from .helpers import Response, Session, errors, replace, repository
 from .test_collection import NOW, actor, connection, parent
 
 
@@ -108,14 +107,14 @@ def test_buffered_history_is_independent_of_parent_discovery(session, discovery)
         "since": "2024-01-31T00:00:00+00:00",
         "until": "2024-03-02T00:00:00+00:00",
     }
-    assert report.metadata.commit_history == "bounded"
+    assert report.metadata.provenance.last_updated_by.commit_history == "bounded"
     assert report.activities[0].occurred_at.month == 2
     assert report.activities[0].metadata.authored_at.month == 1
     assert report.summaries.repository_counts["commit"] == 1
     assert report.summaries.actor_counts["U_author"]["commit"] == 1
     assert "U_committer" not in report.summaries.actor_counts
     assert any(
-        "24-hour buffer" in text for text in report.metadata.coverage_limitations
+        "24-hour buffer" in text for text in report.metadata.coverage.limitations
     )
     assert api.report_from_json(api.report_to_json(report)) == report
 
@@ -224,7 +223,7 @@ def test_empty_repository_skips_history(session):
     report = api.collect_month("o", "r", 2024, 2, token="test", discovery="full")
     assert not payloads(session)
     assert report.summaries.repository_counts["commit"] == 0
-    assert report.metadata.commit_history == "bounded"
+    assert report.metadata.provenance.last_updated_by.commit_history == "bounded"
 
 
 @pytest.mark.parametrize("year,month", [(1, 1), (1969, 12), (1970, 1)])
@@ -232,9 +231,9 @@ def test_unsupported_dates_select_unbounded_history(session, year, month):
     report = collect(session, [history()], year=year, month=month)
     variables = payloads(session)[0]["variables"]
     assert "since" not in variables and "until" not in variables
-    assert report.metadata.commit_history == "full"
+    assert report.metadata.provenance.last_updated_by.commit_history == "full"
     assert not any(
-        "24-hour buffer" in text for text in report.metadata.coverage_limitations
+        "24-hour buffer" in text for text in report.metadata.coverage.limitations
     )
 
 
@@ -352,7 +351,7 @@ def test_small_inversion_is_recovered_and_large_inversion_is_disclosed(session):
     assert result.activities == ()
     assert any(
         "hide matching ancestors" in text
-        for text in result.metadata.coverage_limitations
+        for text in result.metadata.coverage.limitations
     )
 
 

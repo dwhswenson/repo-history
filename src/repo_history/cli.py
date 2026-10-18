@@ -88,6 +88,7 @@ def _parser() -> argparse.ArgumentParser:
     summary.add_argument(
         "--output", type=Path, help="default: INPUT_DIRECTORY/manifest.json"
     )
+    summary.add_argument("--display-name", help="dataset title; default: owner/repo")
     _progress_option(summary)
     _verbosity(summary)
     return parser
@@ -142,7 +143,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "summarize":
             with progress if progress is not None else nullcontext():
                 LOG.debug("Validating monthly reports in %s", args.input_directory)
-                path = write_manifest(args.input_directory, output_path=args.output)
+                path = write_manifest(
+                    args.input_directory,
+                    output_path=args.output,
+                    display_name=args.display_name,
+                )
             saved(path)
         elif args.command == "backfill":
             with progress if progress is not None else nullcontext():

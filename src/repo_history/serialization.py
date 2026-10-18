@@ -10,12 +10,16 @@ from .models import (
     METADATA_CLASSES,
     Activity,
     Actor,
+    CollectionRun,
+    Coverage,
     Credit,
     GitIdentity,
     MonthlyReport,
     MonthlySummaries,
     PopulationCounts,
+    Provenance,
     ReportMetadata,
+    RepositoryMetadata,
     Subject,
 )
 
@@ -29,11 +33,6 @@ def to_data(value: Any, path: str = "$") -> Any:
         return {
             f.name: to_data(getattr(value, f.name), f"{path}.{f.name}")
             for f in fields(value)
-            if not (
-                isinstance(value, ReportMetadata)
-                and f.name in ("commit_history", "parent_discovery")
-                and getattr(value, f.name) is None
-            )
         }
     if isinstance(value, dict):
         return {key: to_data(item, f"{path}.{key}") for key, item in value.items()}
@@ -46,16 +45,41 @@ def parse_time(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
+def run_from_data(data: dict) -> CollectionRun:
+    values = data.copy()
+    for key in ("started_at", "finished_at", "collection_since", "collection_until"):
+        if values[key] is not None:
+            values[key] = parse_time(values[key])
+    return CollectionRun(**values)
+
+
+def repository_from_data(data: dict) -> RepositoryMetadata:
+    values = data.copy()
+    values["created_at"] = parse_time(values["created_at"])
+    if values["history_start_established_by"] is not None:
+        values["history_start_established_by"] = run_from_data(
+            values["history_start_established_by"]
+        )
+    return RepositoryMetadata(**values)
+
+
+def metadata_from_data(data: dict) -> ReportMetadata:
+    values = data.copy()
+    values["repository"] = repository_from_data(values["repository"])
+    for key in ("month_start", "month_end"):
+        values[key] = parse_time(values[key])
+    values["provenance"] = Provenance(
+        **{k: run_from_data(v) for k, v in values["provenance"].items()}
+    )
+    values["coverage"] = Coverage(
+        parse_time(values["coverage"]["as_of"]),
+        tuple(values["coverage"]["limitations"]),
+    )
+    return ReportMetadata(**values)
+
+
 def from_data(data: dict) -> MonthlyReport:
-    metadata = data["metadata"].copy()
-    for key in (
-        "month_start",
-        "month_end",
-        "collection_started_at",
-        "collection_finished_at",
-    ):
-        metadata[key] = parse_time(metadata[key])
-    metadata["coverage_limitations"] = tuple(metadata["coverage_limitations"])
+    metadata = metadata_from_data(data["metadata"])
     activities = []
     for item in data["activities"]:
         details = item["metadata"].copy()
@@ -82,7 +106,7 @@ def from_data(data: dict) -> MonthlyReport:
         k: PopulationCounts(**v) for k, v in summary["distinct_actors_by_type"].items()
     }
     return MonthlyReport(
-        ReportMetadata(**metadata),
+        metadata,
         tuple(Actor(**a) for a in data["actors"]),
         tuple(activities),
         MonthlySummaries(**summary),

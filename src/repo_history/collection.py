@@ -22,7 +22,6 @@ from .models import (
     PRMergedMetadata,
     PROpenedMetadata,
     PRReviewMetadata,
-    ReportMetadata,
     Subject,
 )
 from .pagination import iter_embedded_connection
@@ -568,20 +567,41 @@ def _collect_month(
         limitations += (BOUNDED_LIMITATION,)
     if not repository.issues_enabled:
         limitations += ("Issues are disabled; the issue connection was not collected.",)
-    metadata = ReportMetadata(
-        repository_node_id=repository.repository_node_id,
-        repository_full_name=repository.repository_full_name,
-        repository_url=repository.repository_url,
-        month=f"{start.year:04d}-{start.month:02d}",
-        month_start=start,
-        month_end=end,
-        collection_started_at=started,
-        collection_finished_at=_utc_now(),
-        ongoing=start <= started < end,
-        default_branch=repository.default_branch,
-        default_branch_head=repository.default_branch_head,
-        coverage_limitations=limitations,
-        commit_history=strategy,
-        parent_discovery=discovery,
+    from .models import RepositoryHistory
+    from .provenance import make_run, report_metadata
+
+    if repository.created_at is None:
+        raise GraphQLError(
+            "missing repository creation timestamp", operation="RepositoryLookup"
+        )
+    finished = _utc_now()
+    run = make_run(
+        "collect_month",
+        started,
+        finished,
+        since=start,
+        until=end,
+        parents=discovery,
+        commits=strategy,
+        requested_start=f"{start.year:04d}-{start.month:02d}",
+        requested_end=f"{start.year:04d}-{start.month:02d}",
     )
+    snapshot = RepositoryHistory(
+        repository.repository_node_id,
+        repository.repository_full_name,
+        repository.repository_url,
+        repository.created_at,
+        repository.default_branch,
+        repository.default_branch_head,
+        started,
+        finished,
+        limitations,
+        (),
+        (),
+        run,
+    )
+    metadata = report_metadata(
+        snapshot, f"{start.year:04d}-{start.month:02d}", start, end
+    )
+
     return build_report(metadata, records.actors.values(), records.activities.values())

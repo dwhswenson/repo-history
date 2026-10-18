@@ -41,21 +41,55 @@ class GitIdentity:
 
 
 @dataclass(frozen=True)
+class CollectionRun:
+    run_id: str
+    command: str
+    mode: str
+    collector_version: str
+    started_at: datetime
+    finished_at: datetime
+    collection_since: datetime | None = None
+    collection_until: datetime | None = None
+    requested_start_month: str | None = None
+    requested_end_month: str | None = None
+    parent_discovery: str | None = None
+    commit_history: str | None = None
+
+
+@dataclass(frozen=True)
+class RepositoryMetadata:
+    node_id: str
+    full_name: str
+    url: str
+    created_at: datetime
+    history_start_month: str | None = None
+    history_start_established_by: CollectionRun | None = None
+
+
+@dataclass(frozen=True)
+class Provenance:
+    created_by: CollectionRun
+    last_updated_by: CollectionRun
+    last_rebuilt_by: CollectionRun
+
+
+@dataclass(frozen=True)
+class Coverage:
+    as_of: datetime
+    limitations: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class ReportMetadata:
-    repository_node_id: str
-    repository_full_name: str
-    repository_url: str
+    repository: RepositoryMetadata
     month: str
     month_start: datetime
     month_end: datetime
-    collection_started_at: datetime
-    collection_finished_at: datetime
+    provenance: Provenance
+    coverage: Coverage
     ongoing: bool
     default_branch: str | None
     default_branch_head: str | None
-    coverage_limitations: tuple[str, ...] = ()
-    commit_history: Literal["bounded", "full"] | None = None
-    parent_discovery: Literal["bounded", "full"] | None = None
 
 
 @dataclass(frozen=True)
@@ -224,3 +258,4 @@ class RepositoryHistory:
     coverage_limitations: tuple[str, ...]
     actors: tuple[Actor, ...]
     activities: tuple[Activity, ...]
+    run: CollectionRun | None = None

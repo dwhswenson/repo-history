@@ -4,6 +4,7 @@ import logging
 import os
 import re
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
@@ -62,9 +63,11 @@ def _run_backfill(
     token: str | None = None,
     on_written: Callable[[Path], None] | None = None,
     now: datetime | None = None,
+    command: str = "backfill",
 ) -> list[Path]:
     _validate_request(owner, repo)
     now = _utc_now() if now is None else now
+    requested_end = end
     end = _validate_optional_range(start, end, now)
     emit("phase", stage="Preparing", detail="Validating destination")
     repository_id = _check_directory(Path(output_directory))
@@ -72,6 +75,21 @@ def _run_backfill(
     history = _collect_history(
         owner, repo, token=token, expected_repository_id=repository_id, started=now
     )
+    from .provenance import make_run
+    from .state import write_collection_state
+    from .writing import directory_repository
+
+    run = make_run(
+        command,
+        history.collection_started_at,
+        history.collection_finished_at,
+        parents="full",
+        commits="full",
+        requested_start=start,
+        requested_end=requested_end,
+    )
+    history = replace(history, run=run)
+    prior_repository = directory_repository(Path(output_directory))
     timer = perf_counter()
     completed = False
     paths = []
@@ -79,7 +97,23 @@ def _run_backfill(
         emit(
             "start", stage="Grouping", detail="Grouping and validating monthly reports"
         )
-        reports = history_to_months(history, start, end)
+        effective_start = start
+        if (
+            start is None
+            and prior_repository is not None
+            and prior_repository.history_start_month is not None
+        ):
+            earliest = min(
+                [
+                    history.repository_created_at,
+                    *(a.occurred_at for a in history.activities),
+                ]
+            )
+            effective_start = min(
+                prior_repository.history_start_month,
+                f"{earliest.year:04d}-{earliest.month:02d}",
+            )
+        reports = history_to_months(history, effective_start, end)
         emit(
             "complete",
             stage="Grouping",
@@ -95,11 +129,14 @@ def _run_backfill(
         emit("total", stage="Writing", total=len(reports))
         for report in reports:
             emit("detail", detail=f"{report.metadata.month}.json")
-            path = _write_report(report, output_directory)
+            path = _write_report(
+                report, output_directory, previous_repository=prior_repository
+            )
             paths.append(path)
             emit("advance", stage="Writing")
             if on_written is not None:
                 on_written(path)
+        write_collection_state(output_directory, run, history=history)
         emit("complete", stage="Writing", detail=f"Saved {len(paths)} monthly reports")
         emit("finish", stage="Completed", detail=f"Saved {len(paths)} monthly reports")
         completed = True

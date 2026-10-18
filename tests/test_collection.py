@@ -8,7 +8,14 @@ import pytest
 import repo_history as api
 from repo_history import collection
 
-from .helpers import Response, Session, empty_commits, errors, repository
+from .helpers import (
+    Response,
+    Session,
+    empty_commits,
+    errors,
+    repository,
+    without_run_ids,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -222,11 +229,11 @@ def test_multi_month_history(session):
         "B_merger",
     }
     assert report.metadata.default_branch_head == "a" * 40
-    assert report.metadata.repository_full_name == "new-owner/new-name"
+    assert report.metadata.repository.full_name == "new-owner/new-name"
     assert report.metadata.month_end == datetime(2024, 3, 1, tzinfo=timezone.utc)
     assert not report.metadata.ongoing
     assert any(
-        "24-hour buffer" in text for text in report.metadata.coverage_limitations
+        "24-hour buffer" in text for text in report.metadata.coverage.limitations
     )
     api.validate_report(report)
     assert api.report_from_json(api.report_to_json(report)) == report
@@ -256,7 +263,7 @@ def test_multi_month_history(session):
     assert payloads[1]["variables"] == {"id": "R_example", "first": 100, "after": None}
     assert payloads[2]["variables"]["id"] == "I_old"
     session.closed = False
-    assert collect(session, history()) == report
+    assert without_run_ids(collect(session, history())) == without_run_ids(report)
     session.closed = False
     january = collect(session, history(), month=1)
     assert {a.id for a in january.activities} == {
@@ -373,7 +380,7 @@ def test_empty_month_and_disabled_issues(session, empty_repository):
         None if empty_repository else "a" * 40
     )
     assert any(
-        "Issues are disabled" in value for value in report.metadata.coverage_limitations
+        "Issues are disabled" in value for value in report.metadata.coverage.limitations
     )
 
 
@@ -445,7 +452,7 @@ def test_ongoing_is_fixed_at_collection_start(session, monkeypatch):
     monkeypatch.setattr(collection, "_utc_now", lambda: next(times))
     report = collect(session, [repository(), connection("pullRequests")])
     assert report.metadata.ongoing
-    assert report.metadata.collection_finished_at == NOW
+    assert report.metadata.provenance.last_updated_by.finished_at == NOW
 
 
 def test_environment_authentication(session, monkeypatch):
@@ -779,7 +786,7 @@ def test_comments_reviews_multi_month_history(session):
         ("RepositoryPullRequests", "R_example", "pr"),
     ]
     session.closed = False
-    assert collect(session, history()) == report
+    assert without_run_ids(collect(session, history())) == without_run_ids(report)
     session.closed = False
     january = collect(session, history(), month=1)
     assert "issue_comment:C_before" in {a.id for a in january.activities}

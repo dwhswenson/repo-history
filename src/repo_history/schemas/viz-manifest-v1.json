@@ -6,28 +6,16 @@
     "schema_version": {
       "const": "1"
     },
-    "repository": {
-      "type": "object",
-      "properties": {
-        "node_id": {
-          "type": "string",
-          "minLength": 1
-        },
-        "full_name": {
-          "type": "string",
-          "minLength": 1
-        },
-        "url": {
-          "type": "string",
-          "format": "uri"
-        }
-      },
-      "required": [
-        "node_id",
-        "full_name",
-        "url"
-      ],
-      "additionalProperties": false
+    "display_name": {
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "repositories": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "urn:repo-history-tracking:common:1#/$defs/repository"
+      }
     },
     "actors": {
       "type": "object",
@@ -50,61 +38,36 @@
         "type": "object",
         "properties": {
           "metadata": {
-            "type": "object",
-            "properties": {
-              "month": {
-                "type": "string",
-                "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$"
-              },
-              "month_start": {
-                "type": "string",
-                "format": "date-time",
-                "pattern": "Z$"
-              },
-              "month_end": {
-                "type": "string",
-                "format": "date-time",
-                "pattern": "Z$"
-              },
-              "collection_started_at": {
-                "type": "string",
-                "format": "date-time",
-                "pattern": "Z$"
-              },
-              "collection_finished_at": {
-                "type": "string",
-                "format": "date-time",
-                "pattern": "Z$"
-              },
-              "ongoing": {
-                "type": "boolean"
-              },
-              "coverage_limitations": {
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "minLength": 1
-                }
-              }
-            },
-            "required": [
-              "month",
-              "month_start",
-              "month_end",
-              "collection_started_at",
-              "collection_finished_at",
-              "ongoing",
-              "coverage_limitations"
-            ],
-            "additionalProperties": false
+            "$ref": "urn:repo-history-tracking:common:1#/$defs/calendar"
           },
           "summaries": {
-            "$ref": "#/$defs/summaries"
+            "$ref": "urn:repo-history-tracking:common:1#/$defs/summaries"
+          },
+          "source_reports": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "properties": {
+                "metadata": {
+                  "$ref": "urn:repo-history-tracking:common:1#/$defs/monthly_metadata"
+                },
+                "summaries": {
+                  "$ref": "urn:repo-history-tracking:common:1#/$defs/summaries"
+                }
+              },
+              "required": [
+                "metadata",
+                "summaries"
+              ],
+              "additionalProperties": false
+            }
           }
         },
         "required": [
           "metadata",
-          "summaries"
+          "summaries",
+          "source_reports"
         ],
         "additionalProperties": false
       }
@@ -112,197 +75,10 @@
   },
   "required": [
     "schema_version",
-    "repository",
+    "display_name",
+    "repositories",
     "actors",
     "months"
   ],
-  "additionalProperties": false,
-  "$defs": {
-    "counts": {
-      "type": "object",
-      "properties": {
-        "commit": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "pr_opened": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "pr_merged": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "issue_opened": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "issue_closed": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "issue_reopened": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "issue_comment": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "pr_conversation_comment": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "pr_inline_review_comment": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "pr_review": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        }
-      },
-      "required": [
-        "commit",
-        "pr_opened",
-        "pr_merged",
-        "issue_opened",
-        "issue_closed",
-        "issue_reopened",
-        "issue_comment",
-        "pr_conversation_comment",
-        "pr_inline_review_comment",
-        "pr_review"
-      ],
-      "additionalProperties": false
-    },
-    "population": {
-      "type": "object",
-      "properties": {
-        "total": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "human": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "bot": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "unresolved_git": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        }
-      },
-      "required": [
-        "total",
-        "human",
-        "bot",
-        "unresolved_git"
-      ],
-      "additionalProperties": false
-    },
-    "summaries": {
-      "type": "object",
-      "properties": {
-        "repository_counts": {
-          "$ref": "#/$defs/counts"
-        },
-        "actor_counts": {
-          "type": "object",
-          "propertyNames": {
-            "type": "string",
-            "minLength": 1
-          },
-          "additionalProperties": {
-            "$ref": "#/$defs/counts"
-          }
-        },
-        "distinct_actors": {
-          "$ref": "#/$defs/population"
-        },
-        "distinct_actors_by_type": {
-          "type": "object",
-          "properties": {
-            "commit": {
-              "$ref": "#/$defs/population"
-            },
-            "pr_opened": {
-              "$ref": "#/$defs/population"
-            },
-            "pr_merged": {
-              "$ref": "#/$defs/population"
-            },
-            "issue_opened": {
-              "$ref": "#/$defs/population"
-            },
-            "issue_closed": {
-              "$ref": "#/$defs/population"
-            },
-            "issue_reopened": {
-              "$ref": "#/$defs/population"
-            },
-            "issue_comment": {
-              "$ref": "#/$defs/population"
-            },
-            "pr_conversation_comment": {
-              "$ref": "#/$defs/population"
-            },
-            "pr_inline_review_comment": {
-              "$ref": "#/$defs/population"
-            },
-            "pr_review": {
-              "$ref": "#/$defs/population"
-            }
-          },
-          "required": [
-            "commit",
-            "pr_opened",
-            "pr_merged",
-            "issue_opened",
-            "issue_closed",
-            "issue_reopened",
-            "issue_comment",
-            "pr_conversation_comment",
-            "pr_inline_review_comment",
-            "pr_review"
-          ],
-          "additionalProperties": false
-        },
-        "unattributed_total": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "unattributed_by_type": {
-          "$ref": "#/$defs/counts"
-        }
-      },
-      "required": [
-        "repository_counts",
-        "actor_counts",
-        "distinct_actors",
-        "distinct_actors_by_type",
-        "unattributed_total",
-        "unattributed_by_type"
-      ],
-      "additionalProperties": false
-    }
-  }
+  "additionalProperties": false
 }

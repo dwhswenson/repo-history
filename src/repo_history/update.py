@@ -1,6 +1,7 @@
 """Internal update orchestration and filename-based start selection."""
 
 import logging
+from dataclasses import replace
 from pathlib import Path
 
 from .backfill import _parse_month, _run_backfill
@@ -52,6 +53,7 @@ def _run_update(
             now=now,
             token=token,
             on_written=on_written,
+            command="update",
         )
     first = _month_bounds(*_parse_month(start))[0]
     after = _month_bounds(*_parse_month(end))[1]
@@ -66,6 +68,21 @@ def _run_update(
         end=after,
         discovery="bounded",
     )
+    from .provenance import make_run
+    from .state import write_collection_state
+
+    run = make_run(
+        "update",
+        history.collection_started_at,
+        history.collection_finished_at,
+        since=first,
+        until=after,
+        parents=parents,
+        commits=commits,
+        requested_start=start,
+        requested_end=end,
+    )
+    history = replace(history, run=run)
     reports = _history_to_months(
         history,
         start,
@@ -73,10 +90,16 @@ def _run_update(
         parent_discovery=parents,
         commit_history=commits,
     )
+    from .writing import directory_repository
+
+    prior_repository = directory_repository(Path(output_directory))
     paths = []
     for report in reports:
-        path = _write_report(report, output_directory)
+        path = _write_report(
+            report, output_directory, previous_repository=prior_repository
+        )
         paths.append(path)
         if on_written is not None:
             on_written(path)
+    write_collection_state(output_directory, run)
     return paths

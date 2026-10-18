@@ -1,7 +1,6 @@
 """Offline discovery selection, hydration, and shared-source report comparisons."""
 
 from copy import deepcopy
-from dataclasses import replace
 from datetime import datetime, timezone
 from urllib.parse import parse_qs, urlsplit
 
@@ -12,7 +11,15 @@ from repo_history import collection
 from repo_history.discovery import BOUNDED_DISCOVERY_LIMITATION
 from repo_history.queries import parent_hydration_query
 
-from .helpers import Response, Session, empty_commits, errors, repository
+from .helpers import (
+    Response,
+    Session,
+    empty_commits,
+    errors,
+    replace,
+    repository,
+    without_run_ids,
+)
 from .test_collection import (
     actor,
     comment,
@@ -314,8 +321,8 @@ def test_earliest_month_selects_full_before_discovery(session, caplog):
     session.responses = [repository(), connection("pullRequests")]
     report = api.collect_month("o", "r", 1, 1, token="test", discovery="bounded")
     assert report.metadata.month == "0001-01"
-    assert report.metadata.parent_discovery == "full"
-    assert BOUNDED_DISCOVERY_LIMITATION not in report.metadata.coverage_limitations
+    assert report.metadata.provenance.last_updated_by.parent_discovery == "full"
+    assert BOUNDED_DISCOVERY_LIMITATION not in report.metadata.coverage.limitations
     assert api.report_from_json(api.report_to_json(report)) == report
     assert "overlap underflow" in caplog.text
     assert "strategy=full" in caplog.text
@@ -523,29 +530,33 @@ def test_shared_histories_produce_identical_complete_reports(
         "bounded",
         month=month,
     )
-    assert full.metadata.parent_discovery == "full"
-    assert bounded_report.metadata.parent_discovery == "bounded"
-    assert BOUNDED_DISCOVERY_LIMITATION not in full.metadata.coverage_limitations
+    assert full.metadata.provenance.last_updated_by.parent_discovery == "full"
     assert (
-        bounded_report.metadata.coverage_limitations.count(BOUNDED_DISCOVERY_LIMITATION)
+        bounded_report.metadata.provenance.last_updated_by.parent_discovery == "bounded"
+    )
+    assert BOUNDED_DISCOVERY_LIMITATION not in full.metadata.coverage.limitations
+    assert (
+        bounded_report.metadata.coverage.limitations.count(BOUNDED_DISCOVERY_LIMITATION)
         == 1
     )
     assert (
         tuple(
             item
-            for item in bounded_report.metadata.coverage_limitations
+            for item in bounded_report.metadata.coverage.limitations
             if item != BOUNDED_DISCOVERY_LIMITATION
         )
-        == full.metadata.coverage_limitations
+        == full.metadata.coverage.limitations
     )
     # Only strategy provenance and its associated limitation differ.
-    assert full == replace(
-        bounded_report,
-        metadata=replace(
-            bounded_report.metadata,
-            parent_discovery="full",
-            coverage_limitations=full.metadata.coverage_limitations,
-        ),
+    assert without_run_ids(full) == without_run_ids(
+        replace(
+            bounded_report,
+            metadata=replace(
+                bounded_report.metadata,
+                parent_discovery="full",
+                coverage_limitations=full.metadata.coverage.limitations,
+            ),
+        )
     )
     assert bounded_report.metadata.ongoing == (month == 4)
     if month == 2:
@@ -652,12 +663,12 @@ def test_explicit_bounded_matches_default_request_sequence(session):
     history = [repository(), Response([])]
     session.responses = deepcopy(history)
     default = api.collect_month("o", "r", 2024, 2, token="test")
-    assert default.metadata.parent_discovery == "bounded"
+    assert default.metadata.provenance.last_updated_by.parent_discovery == "bounded"
     calls = deepcopy(session.calls)
     session.calls.clear()
     session.responses = deepcopy(history)
     explicit = api.collect_month("o", "r", 2024, 2, token="test", discovery="bounded")
-    assert default == explicit
+    assert without_run_ids(default) == without_run_ids(explicit)
     assert session.calls == calls
 
 

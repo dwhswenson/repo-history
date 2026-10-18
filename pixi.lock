@@ -2671,6 +2671,7 @@ packages:
   name: repo-history
   requires_dist:
   - jsonschema[format]>=4.18,<5
+  - referencing>=0.30,<1
   - requests>=2.32,<3
   - rich>=13.7,<15
   requires_python: '>=3.12'

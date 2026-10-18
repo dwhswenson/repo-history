@@ -1,20 +1,20 @@
 """Tests for repo_history.serialization."""
 
 import json
-from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
-from jsonschema import Draft202012Validator, FormatChecker
 
 from repo_history import (
     ReportValidationError,
     build_report,
-    load_schema,
     report_from_json,
     report_to_json,
 )
+from repo_history.contracts import contract_validator
+
+from .helpers import replace
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -22,11 +22,9 @@ FIXTURES = Path(__file__).parent / "fixtures"
 @pytest.mark.parametrize("name", ["mixed-2024-02.json", "empty-2024-02.json"])
 def test_fixtures_round_trip(name):
     text = (FIXTURES / name).read_text()
-    Draft202012Validator(load_schema(), format_checker=FormatChecker()).validate(
-        json.loads(text)
-    )
+    contract_validator("monthly-report").validate(json.loads(text))
     report = report_from_json(text)
-    assert report.metadata.parent_discovery is None
+    assert report.metadata.provenance.last_updated_by.parent_discovery is None
     assert report_from_json(report_to_json(report)) == report
     assert report_to_json(report) == text
 
@@ -35,14 +33,19 @@ def test_fixtures_round_trip(name):
 def test_parent_discovery_round_trip(mixed, strategy):
     report = replace(mixed, metadata=replace(mixed.metadata, parent_discovery=strategy))
     text = report_to_json(report)
-    assert json.loads(text)["metadata"]["parent_discovery"] == strategy
+    assert (
+        json.loads(text)["metadata"]["provenance"]["last_updated_by"][
+            "parent_discovery"
+        ]
+        == strategy
+    )
     assert report_from_json(text) == report
 
 
-@pytest.mark.parametrize("strategy", ["unknown", True, 0, None])
+@pytest.mark.parametrize("strategy", ["unknown", True, 0])
 def test_invalid_parent_discovery_json_rejected(mixed, strategy):
     data = json.loads(report_to_json(mixed))
-    data["metadata"]["parent_discovery"] = strategy
+    data["metadata"]["provenance"]["last_updated_by"]["parent_discovery"] = strategy
     with pytest.raises(ReportValidationError, match="parent_discovery"):
         report_from_json(json.dumps(data))
 

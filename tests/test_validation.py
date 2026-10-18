@@ -1,7 +1,6 @@
 """Tests for repo_history.validation."""
 
 import json
-from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -19,6 +18,8 @@ from repo_history import (
     report_from_json,
     report_to_json,
 )
+
+from .helpers import replace
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -143,9 +144,12 @@ def test_half_open_interval(mixed):
         (("metadata", "month_end"), "2024-02-29T00:00:00Z"),
         (("metadata", "month"), "0000-02"),
         (("metadata", "ongoing"), True),
-        (("metadata", "collection_finished_at"), "2024-03-01T00:00:00Z"),
+        (
+            ("metadata", "provenance", "last_updated_by", "finished_at"),
+            "2024-03-01T00:00:00Z",
+        ),
         (("metadata", "default_branch_head"), None),
-        (("metadata", "repository_url"), "not-a-url"),
+        (("metadata", "repository", "url"), "not-a-url"),
         (("actors", 0, "key"), "not-the-node-id"),
         (("actors", 0, "classification"), "unknown"),
         (("activities", 0, "id"), "wrong-id"),

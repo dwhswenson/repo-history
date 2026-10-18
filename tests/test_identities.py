@@ -1,6 +1,5 @@
 """Tests for repo_history.identities."""
 
-from dataclasses import replace
 from hashlib import sha256
 from pathlib import Path
 
@@ -11,6 +10,8 @@ from repo_history import (
     git_identity_key,
     unresolved_git_actor,
 )
+
+from .helpers import replace
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

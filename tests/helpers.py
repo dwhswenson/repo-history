@@ -103,6 +103,7 @@ def repository(**updates):
     item = {
         "id": "R_example",
         "databaseId": 123,
+        "createdAt": "2020-01-01T00:00:00Z",
         "nameWithOwner": "new-owner/new-name",
         "url": "https://github.com/new-owner/new-name",
         "hasIssuesEnabled": False,
@@ -114,3 +115,71 @@ def repository(**updates):
     }
     item.update(updates)
     return Response({"data": {"repository": item}})
+
+
+def replace(value, **changes):
+    """Edit nested report fixture facts concisely; other dataclasses use normal replace."""
+    from dataclasses import replace as dc_replace
+
+    from repo_history import ReportMetadata
+
+    if not isinstance(value, ReportMetadata):
+        return dc_replace(value, **changes)
+    repo = {}
+    run = {}
+    coverage = {}
+    for old, new in (
+        ("repository_node_id", "node_id"),
+        ("repository_full_name", "full_name"),
+        ("repository_url", "url"),
+    ):
+        if old in changes:
+            repo[new] = changes.pop(old)
+    for old, new in (
+        ("collection_started_at", "started_at"),
+        ("collection_finished_at", "finished_at"),
+        ("parent_discovery", "parent_discovery"),
+        ("commit_history", "commit_history"),
+    ):
+        if old in changes:
+            run[new] = changes.pop(old)
+    if "coverage_limitations" in changes:
+        coverage["limitations"] = changes.pop("coverage_limitations")
+    if repo:
+        changes["repository"] = dc_replace(
+            changes.pop("repository", value.repository), **repo
+        )
+    if run:
+        if "started_at" in run:
+            coverage["as_of"] = run["started_at"]
+        changes["provenance"] = dc_replace(
+            value.provenance,
+            **{
+                k: dc_replace(getattr(value.provenance, k), **run)
+                for k in ("created_by", "last_updated_by", "last_rebuilt_by")
+            },
+        )
+    if coverage:
+        changes["coverage"] = dc_replace(value.coverage, **coverage)
+    return dc_replace(value, **changes)
+
+
+def without_run_ids(value):
+    """Compare independent captures without treating their run UUIDs as content."""
+    import json
+
+    from repo_history.serialization import to_data
+
+    if isinstance(value, (bytes, str)):
+        value = json.loads(value)
+    else:
+        value = to_data(value)
+
+    def clean(x):
+        if isinstance(x, dict):
+            return {k: clean(v) for k, v in x.items() if k != "run_id"}
+        if isinstance(x, list):
+            return [clean(v) for v in x]
+        return x
+
+    return clean(value)

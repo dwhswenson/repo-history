@@ -148,8 +148,9 @@ are allowed. Damaged files are rejected even when being replaced; move or repair
 them before retrying. Unrelated filenames and nested directories are ignored.
 Backfill and update check existing files before making network requests; repository
 identity is compared immediately after repository lookup in history and range
-collection, before traversing parents or commits. Backfill and updates scan
-destination reports once; standalone writes still scan on every call.
+collection, before traversing parents or commits. Backfill and update validate the destination before collection and retain its
+history evidence while replacing reports. State publication subsequently verifies
+the saved inventory; standalone writes validate their destination too.
 
 Writing validates the report, writes and validates a temporary UTF-8 file in the
 destination directory, and atomically replaces the target. Failure before
@@ -234,7 +235,7 @@ text = report_to_json(report)
 a validated `MonthlyReport` containing `issue_opened`, `issue_closed`, `issue_reopened`,
 `pr_opened`, `pr_merged`, `issue_comment`, `pr_conversation_comment`,
 `pr_review`, `pr_inline_review_comment`, and `commit` activities.
-Coverage limitations are recorded in `metadata.coverage_limitations`. No files
+Coverage limitations are recorded in `metadata.coverage.limitations`. No files
 are written.
 
 Months use exact UTC half-open boundaries. Future months and invalid inputs are
@@ -271,7 +272,7 @@ ancestor when intermediate timestamps are unusually old. Full issue/PR discovery
 still uses this buffered commit query. Counts support trend reporting and annual
 summaries rather than exhaustive historical audits.
 
-Reports record the actual strategy in `metadata.commit_history` (`bounded`).
+Reports record the actual strategy in `metadata.provenance.last_updated_by.commit_history` (`bounded`).
 If buffered dates overflow or exceed GraphQL's documented supported range
 (1970-01-01 through 2099-12-13), the collector internally selects unbounded
 history (`full`) and applies the same local month filter. When the optional
@@ -310,12 +311,11 @@ The activity rules are unchanged. Unknown discovery modes
 raise `ValueError` before requests. A failure never switches strategies or
 returns a partial report. For January of year 1 only, bounded mode selects full
 traversal before discovery to avoid overlap underflow and logs that selection.
-Reports record the actual selected strategy in `metadata.parent_discovery`
-(`bounded` or `full`), independently of `metadata.commit_history`. The selected
+Reports record the actual selected strategy in `metadata.provenance.last_updated_by.parent_discovery`
+(`bounded` or `full`), independently of `metadata.provenance.last_updated_by.commit_history`. The selected
 strategy is also logged at INFO. Bounded reports include an explicit completeness
-warning in `metadata.coverage_limitations`. An absent optional
-`parent_discovery` field means the strategy is unknown (Python `None`)
-and is omitted on serialization. The January year-1 fallback records `full`.
+warning in `metadata.coverage.limitations`. A null strategy means it is unknown (Python `None`)
+and is serialized explicitly. The January year-1 fallback records `full`.
 Bounded discovery is now the default by user preference; its completeness
 assumptions remain unverified. Instrumentation, comparison tooling, and live
 verification remain follow-on work described in `PERFORMANCE.md`.
@@ -464,20 +464,28 @@ handlers and excludes credentials, query variables, and response bodies.
 
 ```python
 from datetime import datetime, timezone
-from repo_history import ReportMetadata, build_report, report_to_json
+from uuid import uuid4
+from repo_history import (
+    CollectionRun, Coverage, Provenance, RepositoryMetadata, ReportMetadata,
+    build_report, report_to_json,
+)
 
+now = datetime(2024, 3, 2, tzinfo=timezone.utc)
+run = CollectionRun(
+    run_id=str(uuid4()), command="manual", mode="rebuild",
+    collector_version="0.1.0", started_at=now, finished_at=now,
+)
 metadata = ReportMetadata(
-    repository_node_id="R_example",
-    repository_full_name="example/project",
-    repository_url="https://github.com/example/project",
+    repository=RepositoryMetadata(
+        node_id="R_example", full_name="example/project",
+        url="https://github.com/example/project",
+        created_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+    ),
     month="2024-02",
     month_start=datetime(2024, 2, 1, tzinfo=timezone.utc),
     month_end=datetime(2024, 3, 1, tzinfo=timezone.utc),
-    collection_started_at=datetime(2024, 3, 2, tzinfo=timezone.utc),
-    collection_finished_at=datetime(2024, 3, 2, tzinfo=timezone.utc),
-    ongoing=False,
-    default_branch=None,
-    default_branch_head=None,
+    provenance=Provenance(run, run, run), coverage=Coverage(now),
+    ongoing=False, default_branch=None, default_branch_head=None,
 )
 report = build_report(metadata, actors=[], activities=[])
 text = report_to_json(report)
@@ -500,15 +508,43 @@ The authoritative Draft 2020-12 schema is packaged at
 activity types, roles, and versions are rejected. GitHub reason/state strings and
 nulls remain representable. Schema versioning is independent of package versioning.
 
-Metadata records repository node ID/current name/URL, UTC month boundaries,
-collection interval, ongoing flag, captured branch/head, and coverage limitations.
-Optional `parent_discovery` and `commit_history` fields record the actual strategies
-used for issue/PR parent discovery and commit traversal, respectively. Missing
-strategy fields mean unknown, not a presumed default.
-The ongoing flag and future-month rejection use collection start rather than the
-reader's clock. Null branch/head denotes an empty repository. Event occurrence
-must lie in `[month_start, month_end)`; contextual timestamps may be outside it.
-Aware Python datetimes normalize to UTC `Z`; naive datetimes are invalid.
+Metadata nests repository identity and creation time in `repository`, collection
+provenance in `provenance`, and observation time and limitations in `coverage`.
+It also records UTC month boundaries, `ongoing`, and captured default branch/head.
+`ongoing` reflects `coverage.as_of < month_end`, not the original report's creation
+time or the reader's clock. Current collectors conservatively use collection start
+as the observation time. Null branch/head denotes an empty repository. Event
+occurrence must lie in `[month_start, month_end)`; source timestamps can be
+future-dated. Aware datetimes normalize to UTC `Z`; naive datetimes are invalid.
+
+`repository.history_start_month` and `history_start_established_by` are either both
+null (unknown) or both present. Full-history collection establishes the earlier of
+repository creation and earliest observed activity, including imported commits.
+Backfill retains this evidence even when an explicit output range omits early
+months. Bounded collection cannot establish the boundary; updates preserve prior
+evidence and never move the known boundary later. Explicit reports preceding a
+known boundary must be zero activity.
+
+The three provenance descriptors are `created_by`, `last_updated_by`, and
+`last_rebuilt_by`. Replacements retain the original creator. Current updates
+reconstruct their selected months and advance both latest descriptors; a future
+incremental update can retain the rebuild descriptor while advancing the latest
+update. There is no growing update-history array; version control can retain it.
+A successful refresh with no activity still updates provenance and coverage.
+
+Every run records a UUID, entry point (`command`), `mode` (`rebuild` or
+`incremental`), collector version, collection timestamps, nullable historical
+collection bounds, nullable requested output month bounds, and actual
+`parent_discovery`/`commit_history` strategies. Null bounds mean unbounded; null
+strategies mean unknown. Backfill always traverses full history, so requested
+output start and collection start are independent. A run ID always identifies
+one immutable descriptor. Coverage limitations describe the resulting data;
+incremental refreshes must not erase unresolved limitations.
+
+The shared definitions live in packaged `schemas/common-v1.json`; Python and
+browser validation resolve them locally without fetching schemas. These
+unreleased v1 contracts were revised in place. Regenerate older reports and
+manifests: obsolete layouts are rejected rather than migrated.
 
 Each activity has `id`, `type`, `occurred_at`, nullable `url`, a `subject`,
 `credits`, and type-specific `metadata`. Types are `commit`, `pr_opened`,
@@ -568,7 +604,7 @@ establish when a commit reached the branch. Force-pushes, rebases, changed defau
 branches, and newly available data can revise rerun results. Collection is not a
 transactional snapshot; concurrent changes may appear on a later rerun.
 Disabled issues do not prevent later PR collection. Record applicable limitations
-in `metadata.coverage_limitations`.
+in `metadata.coverage.limitations`.
 
 ## License
 
@@ -591,8 +627,63 @@ Redirected stderr and `--verbose` use throttled plain progress messages;
 `--no-progress` disables added progress, and `--quiet` suppresses progress and the
 saved path while retaining errors. Python manifest APIs remain silent by default.
 
-Publish the resulting `manifest.json` and the `repo-history-viz` bundle. The browser loads only the manifest. It contains monthly summaries, stable actor keys with classifications, and coverage metadata; full event records and actor profile fields remain in the monthly files. The generator validates every source report and atomically replaces the manifest. Rebuild explicitly after adding, replacing, or deleting reports; backfill and update remain independent. Do not modify source reports concurrently with generation.
+Publish the resulting `manifest.json` and the `repo-history-viz` bundle. The browser loads only the manifest. It contains a display name, repository registry, monthly aggregate and source summaries, stable actor keys with classifications, and coverage metadata; full event records and actor profile fields remain in the monthly files. The generator validates every source report and atomically replaces the manifest. Rebuild explicitly after adding, replacing, or deleting reports; backfill and update remain independent. Do not modify source reports concurrently with generation.
 
-The Python APIs are `build_manifest(reports) -> dict` and `write_manifest(report_directory, *, output_path=None) -> Path`. The packaged contract is `schemas/viz-manifest-v1.json`, independently versioned from monthly reports. The generator rejects empty directories, wrong month filenames, mixed repositories, and conflicting classifications for participating actors. Only immediate monthly report files are read; unrelated files and subdirectories are ignored.
+The Python APIs are `build_manifest(reports, *, display_name=None) -> dict` and `write_manifest(report_directory, *, output_path=None, display_name=None) -> Path`. The packaged contract is `schemas/viz-manifest-v1.json`, independently versioned from monthly reports. The generator rejects empty directories, wrong month filenames, mixed repositories, and conflicting classifications for participating actors. Only immediate monthly report files are read; unrelated files and subdirectories are ignored.
 
 See [the visualizer documentation](repo-history-viz/README.md) for the `loadManifestSource()` API and embedding examples.
+
+## Repository collection state
+
+Successful `backfill` and `update` operations also write `collection-state.json`
+in their output directory. This is one current state file per repository dataset,
+replaced after successful report writes; it is neither one file per month nor an
+archive of runs. It is not needed by the visualizer and need not be published.
+
+The packaged `schemas/collection-state-v1.json` contract has `schema_version`,
+`repository`, `last_applied_run`, `reports`, and `checkpoint`. `reports` maps each
+stored month to the SHA-256 of its exact file bytes. A populated checkpoint records
+its full-history `baseline_run`, materialized month range, issue and PR
+`checked_through`/`last_full_scan_at`, and commit observation time and branch/head.
+These are observation facts under the recorded limitations, not a guarantee that
+an exact timestamp filter discovers every later change. Pagination cursors are
+not durable checkpoints.
+
+A resumable baseline is emitted only when a full-history backfill saves every
+month from the established history start through its current UTC month, refreshes
+every inventoried report from that run, and leaves no observed future-month
+activity unmaterialized. Partial ranges, historical end dates, mixed refreshes,
+and today's bounded updates write an accurate inventory with `checkpoint: null`.
+Standalone report writes invalidate an existing checkpoint. Creation provenance
+and repository history evidence survive those replacements.
+
+If a run fails after writing some reports, state does not advance. The previous
+state may remain, but its inventory no longer matches and must not be used to
+resume. Report and state publication are individually atomic, not a multi-file
+transaction; writers must remain sequential. `validate_collection_state(data)`
+and `load_collection_state_schema()` are exported; disk inventory verification is
+available as `repo_history.state.verify_collection_state(data, directory)`.
+No incremental collection or automatic resume is implemented yet.
+
+## Prepared multi-repository manifests
+
+The visualization contract now supports `display_name`, `repositories`, `actors`,
+and `months`. `summarize --display-name "Project activity"` sets the title; its
+default is the latest `owner/repo` name. Summarize still rejects mixed repositories.
+There is no `combine-manifests` command yet.
+
+Each month has calendar `metadata`, chart-facing `summaries`, and `source_reports`.
+Each source retains the revised monthly metadata and its own summaries, including
+repository identity, history evidence, provenance, and coverage. Events and actor
+profiles are omitted. Single-repository chart summaries equal the source summary;
+prepared multi-repository summaries sum events and per-actor counts, then union
+identities for distinct contributor populations. Shared commits count once per
+repository; equivalent changes and fork ancestry are not deduplicated.
+
+Both validators check source/aggregate consistency. Multi-repository months must
+be contiguous, have at most one source per repository, and include every
+repository unless that month precedes its known history start. Unknown boundaries
+cannot justify implicit zeros. Single-repository manifests may retain gaps.
+Ongoing sources remain representable and visible; a future combining command will
+exclude an entire calendar month by default when any source is ongoing, warning
+instead of silently undercounting, with an explicit inclusion override.
