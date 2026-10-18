@@ -297,11 +297,8 @@ describe("monthly and cumulative aggregation", () => {
       aggregate(
         {
           schema_version: "1",
-          repository: {
-            node_id: "r",
-            full_name: "o/r",
-            url: "https://example.org",
-          },
+          display_name: "o/r",
+          repositories: [],
           actors: {},
           months: [],
         },
@@ -312,11 +309,8 @@ describe("monthly and cumulative aggregation", () => {
       aggregate(
         {
           schema_version: "1",
-          repository: {
-            node_id: "r",
-            full_name: "o/r",
-            url: "https://example.org",
-          },
+          display_name: "o/r",
+          repositories: [],
           actors: {},
           months: [],
         },
@@ -387,4 +381,33 @@ it("matches the event reference for every measure, identity filter, mode and sel
       }
     }
   }
+});
+
+it("renders prepared cross-repository counts using the existing chart calculations", async () => {
+  const { default: fixture } = await import(
+    "../../tests/fixtures/multi-repo-manifest-v1.json",
+    { with: { type: "json" } }
+  );
+  const { parseManifest } = await import("../src/report");
+  const manifest = parseManifest({
+    name: "multi.json",
+    text: JSON.stringify(fixture),
+  });
+  expect(
+    aggregate(manifest, {
+      ...defaults,
+      start: "2024-02",
+      end: "2024-02",
+      metric: "commits",
+    }).series[0]!.values,
+  ).toEqual([4]);
+  expect(
+    aggregate(manifest, {
+      ...defaults,
+      start: "2024-02",
+      end: "2024-02",
+      metric: "total-contributors",
+      classifications: ["human", "bot", "unresolved_git"],
+    }).series[0]!.values,
+  ).toEqual([5]);
 });

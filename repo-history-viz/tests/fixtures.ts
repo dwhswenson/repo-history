@@ -7,6 +7,8 @@ import {
   type Manifest,
   type Counts,
   type Population,
+  type ReportMetadata,
+  type Summaries,
 } from "../src/report";
 
 export function fixture(month = "2024-02", isEmpty = false) {
@@ -14,8 +16,12 @@ export function fixture(month = "2024-02", isEmpty = false) {
   report.metadata.month = month;
   report.metadata.month_start = `${month}-01T00:00:00Z`;
   report.metadata.month_end = `${nextMonth(month)}-01T00:00:00Z`;
-  report.metadata.collection_started_at = `${nextMonth(month)}-02T12:00:00Z`;
-  report.metadata.collection_finished_at = `${nextMonth(month)}-02T12:05:00Z`;
+  report.metadata.coverage.as_of = `${nextMonth(month)}-02T12:00:00Z`;
+  for (const run of Object.values(report.metadata.provenance)) {
+    run.run_id = `${run.run_id.slice(0, -4)}${month.replace("-", "").slice(-4)}`;
+    run.started_at = `${nextMonth(month)}-02T12:00:00Z`;
+    run.finished_at = `${nextMonth(month)}-02T12:05:00Z`;
+  }
   for (const activity of report.activities) {
     activity.occurred_at = activity.occurred_at.replace("2024-02", month);
     activity.id += `:${month}`;
@@ -66,46 +72,42 @@ export function toManifest(reports: FullReport[]): Manifest {
       bot: keys.filter((k) => actors[k] === "bot").length,
       unresolved_git: keys.filter((k) => actors[k] === "unresolved_git").length,
     });
-    const metadata = { ...report.metadata };
-    // Match the source contract when tests mark a snapshot as ongoing.
-    if (
-      metadata.ongoing &&
-      (Date.parse(metadata.collection_started_at) <
-        Date.parse(metadata.month_start) ||
-        Date.parse(metadata.collection_started_at) >=
-          Date.parse(metadata.month_end))
-    ) {
-      metadata.collection_started_at = `${metadata.month}-15T12:00:00Z`;
-      metadata.collection_finished_at = `${metadata.month}-15T12:05:00Z`;
+    const metadata = structuredClone(report.metadata) as ReportMetadata;
+    // Tests may mark snapshots ongoing after creating their activity fixtures.
+    if (metadata.ongoing) {
+      metadata.coverage.as_of = `${metadata.month}-15T12:00:00Z`;
+      for (const run of Object.values(metadata.provenance)) {
+        run.started_at = metadata.coverage.as_of;
+        run.finished_at = `${metadata.month}-15T12:05:00Z`;
+      }
     }
+    const summaries: Summaries = {
+      repository_counts: counts,
+      actor_counts: perActor,
+      distinct_actors: population(Object.keys(perActor)),
+      distinct_actors_by_type: Object.fromEntries(
+        ACTIVITY_TYPES.map((k) => [
+          k,
+          population(
+            Object.keys(perActor).filter((key) => perActor[key]![k] > 0),
+          ),
+        ]),
+      ) as Record<(typeof ACTIVITY_TYPES)[number], Population>,
+      unattributed_total: Object.values(unattributed).reduce(
+        (a, b) => a + b,
+        0,
+      ),
+      unattributed_by_type: unattributed,
+    };
     return {
       metadata: {
         month: metadata.month,
         month_start: metadata.month_start,
         month_end: metadata.month_end,
-        collection_started_at: metadata.collection_started_at,
-        collection_finished_at: metadata.collection_finished_at,
         ongoing: metadata.ongoing,
-        coverage_limitations: metadata.coverage_limitations,
       },
-      summaries: {
-        repository_counts: counts,
-        actor_counts: perActor,
-        distinct_actors: population(Object.keys(perActor)),
-        distinct_actors_by_type: Object.fromEntries(
-          ACTIVITY_TYPES.map((k) => [
-            k,
-            population(
-              Object.keys(perActor).filter((key) => perActor[key]![k] > 0),
-            ),
-          ]),
-        ) as Record<(typeof ACTIVITY_TYPES)[number], Population>,
-        unattributed_total: Object.values(unattributed).reduce(
-          (a, b) => a + b,
-          0,
-        ),
-        unattributed_by_type: unattributed,
-      },
+      summaries,
+      source_reports: [{ metadata, summaries: structuredClone(summaries) }],
     };
   });
   const latest = [...reports]
@@ -113,11 +115,10 @@ export function toManifest(reports: FullReport[]): Manifest {
     .at(-1)!;
   return {
     schema_version: "1",
-    repository: {
-      node_id: latest.metadata.repository_node_id,
-      full_name: latest.metadata.repository_full_name,
-      url: latest.metadata.repository_url,
-    },
+    display_name: latest.metadata.repository.full_name,
+    repositories: [
+      latest.metadata.repository as Manifest["repositories"][number],
+    ],
     actors,
     months,
   };

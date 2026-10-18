@@ -105,8 +105,8 @@ test("hosted reports, partial months, combined contributors, and mobile layout",
 }) => {
   const partial = fixture("2024-03");
   partial.metadata.ongoing = true;
-  partial.metadata.collection_started_at = "2024-03-15T12:00:00Z";
-  partial.metadata.collection_finished_at = "2024-03-15T12:05:00Z";
+  partial.metadata.coverage.as_of = "2024-03-15T12:00:00Z";
+
   await page.route("**/reports/manifest.json", (route) =>
     route.fulfill({ body: combinedSource([partial, fixture()]).text }),
   );

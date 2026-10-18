@@ -47,7 +47,8 @@ describe("summary manifests", () => {
       m.months[0].metadata.month_end = "2024-04-01T00:00:00Z";
     },
     (m: any) => {
-      m.months[0].metadata.collection_finished_at = "2024-01-01T00:00:00Z";
+      m.months[0].source_reports[0].metadata.provenance.last_updated_by.finished_at =
+        "2024-01-01T00:00:00Z";
     },
     (m: any) => {
       m.months[0].metadata.ongoing = true;
@@ -133,4 +134,47 @@ describe("hosted manifest", () => {
       ),
     ).rejects.toThrow("offline");
   });
+});
+
+describe("prepared multi-repository manifests", () => {
+  it("accepts the Python contract fixture with deduplicated populations", async () => {
+    const { default: fixture } = await import(
+      "../../tests/fixtures/multi-repo-manifest-v1.json",
+      { with: { type: "json" } }
+    );
+    const value = parseManifest({
+      name: "multi.json",
+      text: JSON.stringify(fixture),
+    });
+    expect(value.display_name).toBe("Two repositories");
+    expect(value.repositories).toHaveLength(2);
+    expect(value.months[0]!.summaries.repository_counts.commit).toBe(4);
+    expect(value.months[0]!.summaries.distinct_actors.total).toBe(5);
+  });
+  it.each(["aggregate", "missing", "duplicate", "unknown", "creation", "run"])(
+    "rejects invalid %s source data",
+    async (problem) => {
+      const { default: fixture } = await import(
+        "../../tests/fixtures/multi-repo-manifest-v1.json",
+        { with: { type: "json" } }
+      );
+      const value = structuredClone(fixture),
+        month = value.months[0]!;
+      if (problem === "aggregate") month.summaries.repository_counts.commit++;
+      else if (problem === "missing") month.source_reports.pop();
+      else if (problem === "duplicate")
+        month.source_reports.push(structuredClone(month.source_reports[0]!));
+      else if (problem === "unknown")
+        month.source_reports[0]!.metadata.repository.node_id = "unknown";
+      else if (problem === "creation")
+        month.source_reports[0]!.metadata.repository.created_at =
+          "2019-01-01T00:00:00Z";
+      else
+        month.source_reports[1]!.metadata.provenance.created_by.collector_version =
+          "conflict";
+      expect(() =>
+        parseManifest({ name: "bad.json", text: JSON.stringify(value) }),
+      ).toThrow();
+    },
+  );
 });

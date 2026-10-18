@@ -23,7 +23,7 @@ repo-history summarize --input-directory reports
 repo-history summarize --input-directory reports --output public/reports/manifest.json
 ```
 
-The manifest contains a repository identity, one shared actor-classification lookup, and monthly summaries plus coverage metadata. It omits individual events and actor profile fields. Hosted loading makes one credential-free HTTP(S) request; cross-origin manifests require CORS. Relative manifest URLs resolve against the host document's base URL. Local file selection reads one manifest in browser memory without uploading it.
+The manifest contains a required `display_name`, a `repositories` registry, one shared actor-classification lookup, and prepared monthly summaries with per-repository source summaries and coverage metadata. It omits individual events and actor profile fields. Hosted loading makes one credential-free HTTP(S) request; cross-origin manifests require CORS. Relative manifest URLs resolve against the host document's base URL. Local file selection reads one manifest in browser memory without uploading it.
 
 Regenerate the manifest explicitly after adding, replacing, or deleting monthly reports. Backfill and update do not regenerate it automatically. Source reports must remain unchanged during generation. The manifest is atomically replaced only after every source report and the completed manifest validate.
 
@@ -95,10 +95,10 @@ Call methods after the element is connected. Both loading methods return `Promis
 
 Events bubble and are composed, so the host document can listen:
 
-| Event                | `event.detail`                                                            |
-| -------------------- | ------------------------------------------------------------------------- |
-| `repo-history-load`  | `{ repository: string, months: string[] }`, with chronological month keys |
-| `repo-history-error` | `{ message: string }`                                                     |
+| Event                | `event.detail`                                                                                                                                   |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `repo-history-load`  | `{ display_name: string, repositories: { node_id: string, full_name: string, url: string }[], months: string[] }`, with chronological month keys |
+| `repo-history-error` | `{ message: string }`                                                                                                                            |
 
 Theme variables can be set on the element:
 
@@ -115,7 +115,7 @@ repo-history-viz {
 
 The accent controls primary buttons and selection indicators. Activity series use selected [IBM Carbon colors](https://v10.carbondesignsystem.com/data-visualization/color-palettes/), shared by solid bars, legend keys, and control swatches. PR opens use Purple 80 and PR reviews use Purple 50. Cumulative lines have no visible point markers by default; points appear on hover. Balance uses solid blue for issues and solid orange for PRs. Total contributors also uses a solid line. PNG exports preserve these styles. The default theme uses light surfaces and dark text.
 
-Use **Download PNG** above the chart to save its current plot, axes, and legend at the displayed resolution. The filename includes the repository, measure, chart mode, and month range. PNGs have a transparent background. **Download Data (CSV)** below it exports the same filtered chart data: one row per month with report status and one column per displayed series. Missing reports are marked “No report”; collected months with no activity remain zero.
+Use **Download PNG** above the chart to save its current plot, axes, and legend at the displayed resolution. The filename includes the dataset display name, measure, chart mode, and month range. PNGs have a transparent background. **Download Data (CSV)** below it exports the same filtered chart data: one row per month with report status and one column per displayed series. Missing reports are marked “No report”; collected months with no activity remain zero.
 
 ## Counting and validation
 
@@ -170,3 +170,23 @@ GitHub Activities supports the same identity filter defaults as contributor coun
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+## Revised v1 manifest contract
+
+The unreleased v1 layout was revised in place; regenerate earlier manifests.
+Python and browser validators resolve the packaged shared schema locally.
+
+`display_name` supplies the heading and download filename. For multiple repositories,
+an expandable **Included repositories** list shows their names and links. The
+viewer consumes precomputed `months[*].summaries`; it does not merge input files.
+`source_reports` retains repository-specific metadata and summaries for validation
+and coverage warnings. Contributor counts union actor keys across repositories;
+event counts sum source counts. Coverage messages identify their source repository.
+
+The contract accepts prepared multi-repository manifests, including ongoing sources.
+Missing sources require known pre-history evidence; all other gaps fail validation
+for multiple repositories. Single-repository manifests retain gap visualization.
+The Python `summarize` command still accepts one repository, with optional
+`--display-name`; manifest combining and its ongoing-month exclusion policy are
+future work. Collection state files contain private-to-the-dataset resume metadata
+and are not part of browser input.

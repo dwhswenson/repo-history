@@ -126,7 +126,19 @@ test("manifest attributes load automatically, supersede pending loads, and emit 
         () => (window as unknown as { viewerEvents: unknown[] }).viewerEvents,
       ),
     )
-    .toEqual([{ repository: "example/project", months: ["2024-03"] }]);
+    .toEqual([
+      {
+        display_name: "example/project",
+        repositories: [
+          {
+            node_id: "R_example",
+            full_name: "example/project",
+            url: "https://github.com/example/project",
+          },
+        ],
+        months: ["2024-03"],
+      },
+    ]);
   await page.evaluate(() =>
     document
       .querySelector("repo-history-viz")!
@@ -169,7 +181,14 @@ test("built standalone bundle works without source files and duplicate registrat
     return loaded;
   }, source().text);
   expect(events).toEqual({
-    repository: "example/project",
+    display_name: "example/project",
+    repositories: [
+      {
+        node_id: "R_example",
+        full_name: "example/project",
+        url: "https://github.com/example/project",
+      },
+    ],
     months: ["2024-02"],
   });
   await expect(page.locator("#repository-name")).toHaveText("example/project");
@@ -321,4 +340,29 @@ test("hosted datasets load with one manifest request and no monthly requests", a
   });
   await expect(page.locator("#repository-name")).toHaveText("example/project");
   expect(requested).toEqual(["/reports/manifest.json"]);
+});
+
+test("prepared multi-repository data uses its display name, repository details, and chart exports", async ({
+  page,
+}) => {
+  const { default: fixture } = await import(
+    "../../../tests/fixtures/multi-repo-manifest-v1.json",
+    { with: { type: "json" } }
+  );
+  await page.goto("/");
+  await page.evaluate(async (text) => {
+    const host = document.querySelector("repo-history-viz")!;
+    await host.loadManifestSource({ name: "multi.json", text });
+  }, JSON.stringify(fixture));
+  await expect(page.locator("#repository-name")).toHaveText("Two repositories");
+  const details = page.locator("#repository-details");
+  await expect(details).toBeVisible();
+  await details.locator("summary").click();
+  await expect(page.locator("#repository-list a")).toHaveText([
+    "example/project",
+    "another/project",
+  ]);
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download PNG" }).click();
+  expect((await download).suggestedFilename()).toContain("Two-repositories");
 });

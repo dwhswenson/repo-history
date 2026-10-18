@@ -39,7 +39,7 @@ export function createViewer(
   <main>
     <p id="configuration-error" class="error card" role="alert" hidden></p>
     <section class="loader card" aria-labelledby="load-heading">
-      <div><h2 id="load-heading">Load your manifest</h2><p>Explore one repository’s monthly GitHub activity.</p></div>
+      <div><h2 id="load-heading">Load your manifest</h2><p>Explore monthly GitHub activity across a selected set of repositories.</p></div>
       <div class="load-options">
         <label class="file-button">Choose manifest JSON<input id="files" type="file" accept=".json,application/json" aria-label="Choose manifest JSON"></label>
         <span class="or">or</span>
@@ -62,7 +62,7 @@ export function createViewer(
         </aside>
         <div class="results">
           <section class="chart-card card" aria-labelledby="chart-title"><div class="chart-heading"><div><p class="eyebrow" id="chart-subtitle"></p><h2 id="chart-title"></h2></div><div class="chart-downloads"><button id="download-chart" class="text-button" type="button">Download PNG</button><button id="download-data" class="text-button" type="button">Download Data (CSV)</button></div></div><p id="chart-note" class="chart-note"></p><p id="warnings" class="warning" role="status" hidden></p><p id="no-series" class="warning" hidden>Select at least one contribution type to draw a chart.</p><div class="chart-wrap"><canvas id="chart" role="img" aria-label="Repository activity chart. Exact values are available through Download Data (CSV)."></canvas></div></section>
-          <details class="card coverage-card"><summary>About these counts and report coverage</summary><p>GitHub activity counts follow the actor filters, excluding known bots by default. Undetermined includes events with missing actors. Commit counts include all recorded commits. Contributor counts include only credited identities matching your filters. Contextual subject authors do not receive credit.</p><p>Unresolved Git identities are estimates and may represent the same person as another identity. A known account is tracked by its stable actor key, even if its login changes. Cumulative contributors are a union of identities, not a sum of monthly totals.</p><p>Missing reports are gaps, not zero activity. Cumulative charts resume from the last observed total and cover loaded months only. Ongoing months are partial snapshots.</p><ul id="coverage-list"></ul></details>
+          <details id="repository-details" class="card coverage-card" hidden><summary>Included repositories</summary><ul id="repository-list"></ul></details><details class="card coverage-card"><summary>About these counts and report coverage</summary><p>GitHub activity counts follow the actor filters, excluding known bots by default. Undetermined includes events with missing actors. Commit counts include all recorded commits. Contributor counts include only credited identities matching your filters. Contextual subject authors do not receive credit.</p><p>Unresolved Git identities are estimates and may represent the same person as another identity. A known account is tracked by its stable actor key, even if its login changes. Cumulative contributors are a union of identities, not a sum of monthly totals.</p><p>Missing reports are gaps, not zero activity. Cumulative charts resume from the last observed total and cover loaded months only. Ongoing months are partial snapshots.</p><ul id="coverage-list"></ul></details>
         </div>
       </div>
     </section>
@@ -137,7 +137,19 @@ export function createViewer(
     end.value = String(months.length - 1);
     element("empty").hidden = true;
     element("dashboard").hidden = false;
-    element("repository-name").textContent = manifest!.repository.full_name;
+    element("repository-name").textContent = manifest!.display_name;
+    const details = element("repository-details");
+    details.hidden = manifest!.repositories.length < 2;
+    element("repository-list").replaceChildren(
+      ...manifest!.repositories.map((repo) => {
+        const li = document.createElement("li"),
+          link = document.createElement("a");
+        link.textContent = repo.full_name;
+        link.href = repo.url;
+        li.append(link);
+        return li;
+      }),
+    );
     element("report-summary").textContent =
       `${reports.length} monthly report${reports.length === 1 ? "" : "s"} · ${first} — ${last}`;
     render();
@@ -173,7 +185,10 @@ export function createViewer(
       showDataset(incoming);
       setMessage("load-status", "");
       notify("repo-history-load", {
-        repository: manifest!.repository.full_name,
+        display_name: manifest!.display_name,
+        repositories: manifest!.repositories.map(
+          ({ node_id, full_name, url }) => ({ node_id, full_name, url }),
+        ),
         months: reports.map((report) => report.metadata.month),
       });
     } catch (error) {
@@ -328,19 +343,23 @@ export function createViewer(
         `Missing reports: ${data.missing.join(", ")}. ${cumulative ? "Cumulative totals cover loaded months only." : "Gaps indicate unknown activity."}`,
       );
     for (const month of data.partial) {
-      const metadata = reports.find(
+      const sources = reports.find(
         (report) => report.metadata.month === month,
-      )!.metadata;
-      const collected = new Date(metadata.collection_finished_at);
-      const through = new Date(
-        Math.min(collected.getTime(), Date.parse(metadata.month_end) - 1),
-      )
-        .toISOString()
-        .slice(0, 10);
-      warnings.push(
-        `Partial month: ${metadata.month_start.slice(0, 10)} — ${through} (UTC).`,
-      );
+      )!.source_reports;
+      for (const { metadata } of sources.filter(
+        (source) => source.metadata.ongoing,
+      )) {
+        const through = metadata.coverage.as_of.slice(0, 10);
+        const name =
+          manifest!.repositories.length > 1
+            ? `${metadata.repository.full_name}: `
+            : "";
+        warnings.push(
+          `${name}Partial month: ${metadata.month_start.slice(0, 10)} — ${through} (UTC).`,
+        );
+      }
     }
+
     if ((contributors || githubActivities) && !state.classifications.length)
       warnings.push(
         "No identity categories selected; counts are zero for loaded months.",
@@ -361,7 +380,15 @@ export function createViewer(
               report.metadata.month >= state.start &&
               report.metadata.month <= state.end,
           )
-          .flatMap((report) => report.metadata.coverage_limitations),
+          .flatMap((report) =>
+            report.source_reports.flatMap(({ metadata }) =>
+              metadata.coverage.limitations.map((message) =>
+                manifest!.repositories.length > 1
+                  ? `${metadata.repository.full_name}: ${message}`
+                  : message,
+              ),
+            ),
+          ),
       ),
     ];
     element("coverage-list").replaceChildren(
@@ -374,10 +401,7 @@ export function createViewer(
   }
 
   function download(url: string, extension: string) {
-    const repository = manifest!.repository.full_name.replace(
-      /[^a-zA-Z0-9_-]/g,
-      "-",
-    );
+    const repository = manifest!.display_name.replace(/[^a-zA-Z0-9_-]/g, "-");
     const link = document.createElement("a");
     link.download = `${repository}-${state.metric}-${state.mode}-${state.start}-to-${state.end}.${extension}`;
     link.href = url;
