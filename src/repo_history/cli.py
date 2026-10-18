@@ -11,7 +11,7 @@ from time import perf_counter
 from ._timing import backfill_timing
 from .backfill import _run_backfill, _validate_optional_range, _validate_request
 from .errors import GitHubAPIError, RateLimitError
-from .manifest import write_manifest
+from .manifest import _chop_partial_manifest, write_manifest
 from .update import _prepare_update, _run_update
 
 LOG = logging.getLogger(__name__)
@@ -93,6 +93,26 @@ def _parser() -> argparse.ArgumentParser:
     summary.add_argument("--display-name", help="dataset title; default: owner/repo")
     _progress_option(summary)
     _verbosity(summary)
+    chop = commands.add_parser(
+        "chop-partial",
+        help="Remove one trailing partial month from an existing manifest offline.",
+        description="Remove a trailing ongoing month, leaving at least one "
+        "month. All earlier months must be complete. Already complete manifests "
+        "are left unchanged in place or saved to the explicit output.",
+    )
+    chop.add_argument(
+        "manifest",
+        type=Path,
+        metavar="MANIFEST",
+        help="manifest file or directory containing manifest.json",
+    )
+    chop.add_argument(
+        "--output",
+        "-o",
+        type=Path,
+        help="output manifest path; default: edit in place",
+    )
+    _verbosity(chop)
     return parser
 
 
@@ -101,7 +121,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
     now = _utc_now()
-    if args.command != "summarize":
+    if args.command in {"backfill", "update"}:
         try:
             if args.command == "backfill":
                 _validate_request(*args.repository)
@@ -152,6 +172,11 @@ def main(argv: list[str] | None = None) -> int:
                     display_name=args.display_name,
                 )
             saved(path)
+        elif args.command == "chop-partial":
+            LOG.debug("Chopping trailing partial month in %s", args.manifest)
+            path = _chop_partial_manifest(args.manifest, output_path=args.output)
+            if path is not None:
+                saved(path)
         elif args.command == "backfill":
             with (
                 backfill_timing(LOG, started=timer),

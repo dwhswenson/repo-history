@@ -300,6 +300,65 @@ def write_manifest(
     data = _build_manifest(reports(), check_reports=False, display_name=display_name)
     emit("complete", stage="Reports", detail=f"Summarized {len(paths)} monthly reports")
     emit("phase", stage="Manifest", detail=f"Saving {target.name}")
+    _publish_manifest(data, target)
+    emit("finish", stage="Completed", detail=f"Saved {target.name}")
+    return target
+
+
+def resolve_manifest_path(path: str | os.PathLike) -> Path:
+    """Locate a manifest from an explicit file or a directory containing it.
+
+    Preserve relative paths and leave existence and content checks to the reader.
+    """
+    path = Path(path)
+    return path / "manifest.json" if path.is_dir() else path
+
+
+def _chop_partial_manifest(
+    path: Path, *, output_path: Path | None = None
+) -> Path | None:
+    """Validate and save one manifest; return None for a complete in-place input."""
+    if output_path is not None and MONTHLY_FILE.fullmatch(output_path.name):
+        raise ReportWriteError("manifest output must not overwrite a monthly report")
+    path = resolve_manifest_path(path)
+    source = path.resolve()
+    destination = path if output_path is None else output_path
+    target = destination.resolve()
+    try:
+        data = json.loads(source.read_text(encoding="utf-8"))
+        validate_manifest(data)
+    except ValueError as exc:
+        raise ReportWriteError(f"{path}: invalid manifest: {exc}") from exc
+    ordered = sorted(data["months"], key=lambda m: m["metadata"]["month"])
+    latest = ordered[-1]
+    if any(month["metadata"]["ongoing"] for month in ordered[:-1]):
+        raise ReportWriteError(f"{path}: partial month precedes latest month")
+    if not latest["metadata"]["ongoing"]:
+        if target == source:
+            return None
+    else:
+        if len(ordered) == 1:
+            raise ReportWriteError(f"{path}: chopping would leave no months")
+        data["months"] = [m for m in data["months"] if m is not latest]
+        used = {
+            key
+            for month in data["months"]
+            for source in month["source_reports"]
+            for key in source["summaries"]["actor_counts"]
+        }
+        data["actors"] = {
+            key: value for key, value in data["actors"].items() if key in used
+        }
+        try:
+            validate_manifest(data)
+        except ReportValidationError as exc:
+            raise ReportWriteError(f"{path}: invalid chopped manifest: {exc}") from exc
+    _publish_manifest(data, target)
+    return destination
+
+
+def _publish_manifest(data: dict, target: Path) -> None:
+    """Validate a temporary manifest before atomically replacing its target."""
     text = (
         json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         + "\n"
@@ -325,5 +384,3 @@ def write_manifest(
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
-    emit("finish", stage="Completed", detail=f"Saved {target.name}")
-    return target

@@ -1,6 +1,7 @@
 """Offline producer, shared schema, and atomic publication tests."""
 
 import json
+from copy import deepcopy
 from importlib.resources import files
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from repo_history import (
     write_manifest,
 )
 from repo_history.cli import main
+from repo_history.manifest import resolve_manifest_path
 
 from .helpers import replace
 
@@ -334,3 +336,365 @@ def test_retired_collector_reports_still_summarize_offline(tmp_path, mixed):
     assert main(["summarize", "--input-directory", str(tmp_path), "--quiet"]) == 0
     value = json.loads((tmp_path / "manifest.json").read_text())
     assert value == build_manifest([report_from_json(json.dumps(data))])
+
+
+def shifted_month(template, month, *, ongoing=False):
+    from repo_history.contracts import month_bounds
+    from repo_history.provenance import make_run
+    from repo_history.serialization import to_data
+
+    value = deepcopy(template)
+    start, end = month_bounds(month)
+    calendar = {
+        "month": month,
+        "month_start": to_data(start),
+        "month_end": to_data(end),
+        "ongoing": ongoing,
+    }
+    value["metadata"] = calendar
+    for i, source in enumerate(value["source_reports"]):
+        # One ongoing source makes the whole aggregate month partial.
+        partial = ongoing and i == 0
+        observed = start if partial else end
+        run = to_data(make_run("manual", observed, observed))
+        source["metadata"].update(calendar, ongoing=partial)
+        source["metadata"]["coverage"]["as_of"] = to_data(observed)
+        source["metadata"]["provenance"] = dict.fromkeys(
+            ("created_by", "last_rebuilt_by", "last_updated_by"), run
+        )
+    return value
+
+
+@pytest.fixture(params=["viz-manifest-v1.json", "multi-repo-manifest-v1.json"])
+def choppable(request):
+    value = json.loads((Path(__file__).parent / "fixtures" / request.param).read_text())
+    partial = shifted_month(value["months"][0], "2024-03", ongoing=True)
+    # The partial month has one actor that does not participate in older months.
+    key = next(iter(value["actors"]))
+    value["actors"]["partial-only"] = value["actors"][key]
+    for summary in [
+        partial["summaries"],
+        *[s["summaries"] for s in partial["source_reports"]],
+    ]:
+        summary["actor_counts"]["partial-only"] = summary["actor_counts"].pop(key)
+    value["months"].insert(0, partial)  # Latest month need not be the last entry.
+    manifest.validate_manifest(value)
+    return value
+
+
+@pytest.mark.parametrize("directory_input", [False, True])
+def test_chop_partial_offline_and_preserves_other_files(
+    tmp_path, choppable, monkeypatch, capsys, directory_input
+):
+    import requests
+
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+
+    def no_network(*args, **kwargs):
+        pytest.fail("chop-partial must not access the network")
+
+    monkeypatch.setattr(requests, "Session", no_network)
+    target = tmp_path / "manifest.json"
+    target.write_text(json.dumps(choppable))
+    untouched = {
+        "2024-03.json": b"source report left untouched\n",
+        "collection-state.json": b"collection state left untouched\n",
+    }
+    for name, content in untouched.items():
+        (tmp_path / name).write_bytes(content)
+    expected = deepcopy(choppable)
+    expected["months"].pop(0)
+    expected["actors"].pop("partial-only")
+    input_path = tmp_path if directory_input else target
+    assert main(["chop-partial", str(input_path)]) == 0
+    out, err = capsys.readouterr()
+    assert out == str(target) + "\n" and err == ""
+    actual = json.loads(target.read_text())
+    assert actual == expected
+    manifest.validate_manifest(actual)
+    text = target.read_bytes()
+    assert text.endswith(b"\n") and b"\n" not in text[:-1]
+    assert all(
+        (tmp_path / name).read_bytes() == body for name, body in untouched.items()
+    )
+    assert main(["chop-partial", str(input_path)]) == 0
+    out, err = capsys.readouterr()
+    assert out == err == ""
+    assert target.read_bytes() == text
+
+
+def test_chop_prunes_all_actors_when_only_partial_has_activity(tmp_path, choppable):
+    zero = manifest._sum_summaries([], {})
+    for month in choppable["months"][1:]:
+        month["summaries"] = deepcopy(zero)
+        for source in month["source_reports"]:
+            source["summaries"] = deepcopy(zero)
+    used = set(choppable["months"][0]["summaries"]["actor_counts"])
+    choppable["actors"] = {k: v for k, v in choppable["actors"].items() if k in used}
+    target = tmp_path / "manifest.json"
+    target.write_text(json.dumps(choppable))
+    assert main(["chop-partial", str(target), "--quiet"]) == 0
+    assert json.loads(target.read_text())["actors"] == {}
+
+
+@pytest.mark.parametrize("flag", ["--quiet", "--verbose"])
+def test_chop_symlink_and_verbosity(tmp_path, choppable, capsys, flag):
+    target = tmp_path / "manifest.json"
+    target.write_text(json.dumps(choppable))
+    alias = tmp_path / "alias.json"
+    alias.symlink_to(target)
+    assert main(["chop-partial", str(alias), flag]) == 0
+    out, err = capsys.readouterr()
+    assert out == ("" if flag == "--quiet" else f"{alias}\n")
+    assert ("Chopping trailing partial month" in err) == (flag == "--verbose")
+    assert alias.is_symlink()
+    assert len(json.loads(target.read_text())["months"]) == 1
+
+
+@pytest.mark.parametrize(
+    "problem,message",
+    [
+        ("multiple", "partial month precedes latest month"),
+        ("sole", "leave no months"),
+        ("json", "invalid manifest"),
+        ("encoding", "invalid manifest"),
+        ("structure", "invalid manifest"),
+        ("schema", "invalid manifest"),
+        ("summary", "invalid manifest"),
+        ("missing", "No such file"),
+    ],
+)
+def test_chop_invalid_input_preserves_file(
+    tmp_path, choppable, capsys, problem, message
+):
+    target = tmp_path / "manifest.json"
+    value = deepcopy(choppable)
+    if problem == "multiple":
+        value["months"][1] = shifted_month(value["months"][1], "2024-02", ongoing=True)
+    elif problem == "sole":
+        value["months"].pop()
+        used = set(value["months"][0]["summaries"]["actor_counts"])
+        value["actors"] = {k: v for k, v in value["actors"].items() if k in used}
+    elif problem == "structure":
+        value.pop("months")
+    elif problem == "schema":
+        value["schema_version"] = "2"
+    elif problem == "summary":
+        value["months"][0]["summaries"]["unattributed_total"] += 1
+    content = (
+        b"broken json"
+        if problem == "json"
+        else b"\xff"
+        if problem == "encoding"
+        else json.dumps(value).encode()
+    )
+    if problem != "missing":
+        target.write_bytes(content)
+    assert main(["chop-partial", str(target), "--quiet"]) == 1
+    out, err = capsys.readouterr()
+    assert out == "" and str(target) in err and message in err
+    assert "summarize" not in err
+    if problem != "missing":
+        assert target.read_bytes() == content
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+@pytest.mark.parametrize("complete_latest", [False, True])
+def test_chop_rejects_separated_earlier_partial(
+    tmp_path, choppable, capsys, complete_latest
+):
+    earlier = shifted_month(choppable["months"][1], "2024-01", ongoing=True)
+    choppable["months"].append(earlier)
+    if complete_latest:
+        choppable["months"][0] = shifted_month(choppable["months"][0], "2024-03")
+    target = tmp_path / "manifest.json"
+    content = json.dumps(choppable).encode()
+    target.write_bytes(content)
+    assert main(["chop-partial", str(target)]) == 1
+    out, err = capsys.readouterr()
+    assert out == "" and "partial month precedes latest month" in err
+    assert str(target) in err
+    assert target.read_bytes() == content
+
+
+@pytest.mark.parametrize("sole", [False, True])
+@pytest.mark.parametrize("output_flag", [None, "--output", "-o"])
+@pytest.mark.parametrize("directory_input", [False, True])
+def test_chop_complete_manifest_is_silent_noop(
+    tmp_path, choppable, monkeypatch, capsys, sole, output_flag, directory_input
+):
+    choppable["months"][0] = shifted_month(choppable["months"][0], "2024-03")
+    if sole:
+        choppable["months"].pop(0)
+        choppable["actors"].pop("partial-only")
+    target = tmp_path / "manifest.json"
+    original = json.dumps(choppable, indent=2).encode()
+    target.write_bytes(original)
+
+    def no_publish(*args):
+        pytest.fail("complete manifests must not be rewritten")
+
+    monkeypatch.setattr(manifest, "_publish_manifest", no_publish)
+    options = [] if output_flag is None else [output_flag, str(target)]
+    input_path = tmp_path if directory_input else target
+    assert main(["chop-partial", str(input_path), *options]) == 0
+    out, err = capsys.readouterr()
+    assert out == err == ""
+    assert target.read_bytes() == original
+
+
+@pytest.mark.parametrize("output_flag", ["--output", "-o"])
+@pytest.mark.parametrize("complete", [False, True])
+@pytest.mark.parametrize("directory_input", [False, True])
+def test_chop_explicit_output(
+    tmp_path, choppable, capsys, output_flag, complete, directory_input
+):
+    if complete:
+        choppable["months"][0] = shifted_month(choppable["months"][0], "2024-03")
+    source = tmp_path / "manifest.json"
+    original = json.dumps(choppable, indent=2).encode()
+    source.write_bytes(original)
+    target = tmp_path / "public" / "manifest.json"
+    expected = deepcopy(choppable)
+    if not complete:
+        expected["months"].pop(0)
+        expected["actors"].pop("partial-only")
+    input_path = tmp_path if directory_input else source
+    assert main(["chop-partial", str(input_path), output_flag, str(target)]) == 0
+    out, err = capsys.readouterr()
+    assert out == str(target) + "\n" and err == ""
+    assert source.read_bytes() == original
+    assert json.loads(target.read_text()) == expected
+    manifest.validate_manifest(json.loads(target.read_text()))
+    assert target.read_bytes().endswith(b"\n")
+
+
+def test_chop_explicit_output_same_as_input(tmp_path, choppable, capsys):
+    target = tmp_path / "manifest.json"
+    target.write_text(json.dumps(choppable))
+    assert main(["chop-partial", str(target), "-o", str(target)]) == 0
+    out, err = capsys.readouterr()
+    assert out == str(target) + "\n" and err == ""
+    assert len(json.loads(target.read_text())["months"]) == 1
+
+
+@pytest.mark.parametrize("invalid_input", [False, True])
+def test_chop_explicit_output_validation_preserves_files(
+    tmp_path, choppable, capsys, invalid_input
+):
+    source = tmp_path / "manifest.json"
+    original = b"broken json" if invalid_input else json.dumps(choppable).encode()
+    source.write_bytes(original)
+    target = tmp_path / ("output.json" if invalid_input else "2024-03.json")
+    existing = b"existing output\n"
+    target.write_bytes(existing)
+    assert main(["chop-partial", str(source), "-o", str(target)]) == 1
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert (
+        "invalid manifest" if invalid_input else "overwrite a monthly report"
+    ) in err
+    assert source.read_bytes() == original
+    assert target.read_bytes() == existing
+
+
+@pytest.mark.parametrize("stage", ["validation", "write", "flush", "replace"])
+@pytest.mark.parametrize("separate_output", [False, True])
+def test_chop_atomic_failures(
+    tmp_path, choppable, monkeypatch, capsys, stage, separate_output
+):
+    source = tmp_path / "manifest.json"
+    original = json.dumps(choppable).encode()
+    source.write_bytes(original)
+    target = tmp_path / "output.json" if separate_output else source
+    existing = b"previous output\n" if separate_output else original
+    target.write_bytes(existing)
+    if stage == "validation":
+        validate = manifest.validate_manifest
+        calls = 0
+
+        def fail(data):
+            nonlocal calls
+            calls += 1
+            if calls == 3:
+                raise ReportValidationError("$", "temporary validation failed")
+            validate(data)
+
+        monkeypatch.setattr(manifest, "validate_manifest", fail)
+    elif stage == "replace":
+
+        def fail(*args):
+            raise OSError("replace failed")
+
+        monkeypatch.setattr(manifest.os, "replace", fail)
+    else:
+        factory = manifest.tempfile.NamedTemporaryFile
+
+        class BrokenWriter:
+            def __init__(self, *args, **kwargs):
+                self.stream = factory(*args, **kwargs)
+                self.name = self.stream.name
+
+            def __enter__(self):
+                return self
+
+            def write(self, text):
+                self.stream.write(text[:20])
+                if stage == "write":
+                    raise OSError("write failed")
+
+            def flush(self):
+                raise OSError("flush failed")
+
+            def __exit__(self, *args):
+                self.stream.close()
+
+        monkeypatch.setattr(manifest.tempfile, "NamedTemporaryFile", BrokenWriter)
+    options = ["-o", str(target)] if separate_output else []
+    assert main(["chop-partial", str(source), *options]) == 1
+    out, err = capsys.readouterr()
+    assert out == "" and "failed" in err and "Traceback" not in err
+    assert target.read_bytes() == existing
+    assert source.read_bytes() == original
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+@pytest.mark.parametrize("output_flag", [False, True])
+def test_chop_rejects_multiple_inputs_without_writing(tmp_path, choppable, output_flag):
+    first, second = (tmp_path / name for name in ("first.json", "second.json"))
+    original = json.dumps(choppable).encode()
+    first.write_bytes(original)
+    second.write_bytes(original)
+    output = tmp_path / "output.json"
+    options = ["-o", str(output)] if output_flag else []
+    with pytest.raises(SystemExit) as exc:
+        main(["chop-partial", str(first), str(second), *options])
+    assert exc.value.code == 2
+    assert first.read_bytes() == second.read_bytes() == original
+    assert not output.exists()
+
+
+def test_resolve_manifest_path_files_and_directories(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    directory = Path("reports")
+    directory.mkdir()
+    target = directory / "manifest.json"
+    target.write_text("not read by the resolver")
+    custom = Path("custom.json")
+    custom.write_text("not read by the resolver")
+    alias = Path("alias")
+    alias.symlink_to(directory, target_is_directory=True)
+    inputs = [target, directory, custom, alias]
+    expected = [target, target, custom, alias / "manifest.json"]
+    assert [resolve_manifest_path(p) for p in inputs] == expected
+    assert [resolve_manifest_path(str(p)) for p in inputs] == expected
+    assert resolve_manifest_path("missing.json") == Path("missing.json")
+
+
+def test_chop_directory_without_manifest(tmp_path, capsys):
+    assert resolve_manifest_path(tmp_path) == tmp_path / "manifest.json"
+    assert main(["chop-partial", str(tmp_path)]) == 1
+    out, err = capsys.readouterr()
+    assert out == "" and str(tmp_path / "manifest.json") in err
+    assert not list(tmp_path.iterdir())

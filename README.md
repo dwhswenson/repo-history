@@ -44,6 +44,7 @@ repo-history backfill example/project --start 2024-01 --end 2024-12 --output-dir
 repo-history update example/project --output-directory reports
 repo-history update example/project --start 2024-02 --end 2024-06 --output-directory reports
 repo-history summarize --input-directory reports
+repo-history chop-partial reports
 ```
 
 The output directory is required and is created if missing. All ranges include
@@ -74,9 +75,9 @@ when the directory has no reports. Update always collects its requested interval
 once, then groups activities into monthly files; it does not repeat collection
 independently for each month. Backfill always collects full history once.
 
-The CLI requires one of `backfill`, `update`, or `summarize`. The former implicit
-single-month command and `manifest` command have been removed. For one month,
-use update with equal `--start` and `--end` values. Summarization remains an
+The CLI requires one of `backfill`, `update`, `summarize`, or `chop-partial`.
+The former implicit single-month command and `manifest` command have been removed.
+For one month, use update with equal `--start` and `--end` values. Summarization remains an
 explicit offline step after collection.
 
 `python -m repo_history` supports the same commands.
@@ -635,6 +636,48 @@ Publish the resulting `manifest.json` and the `repo-history-viz` bundle. The bro
 The Python APIs are `build_manifest(reports, *, display_name=None) -> dict` and `write_manifest(report_directory, *, output_path=None, display_name=None) -> Path`. The packaged contract is `schemas/viz-manifest-v1.json`, independently versioned from monthly reports. The generator rejects empty directories, wrong month filenames, mixed repositories, and conflicting classifications for participating actors. Only immediate monthly report files are read; unrelated files and subdirectories are ignored.
 
 See [the visualizer documentation](repo-history-viz/README.md) for the `loadManifestSource()` API and embedding examples.
+
+### Removing a trailing partial month
+
+Use `repo-history chop-partial reports` or
+`repo-history chop-partial reports/manifest.json` to edit an existing manifest
+in place, offline and without GitHub credentials. The command accepts exactly one
+input: either a manifest file or a directory containing `manifest.json`.
+It removes the chronologically latest month when that month has
+`metadata.ongoing: true`, even for an older snapshot. Actors used only in the
+removed month are pruned. Monthly report files and `collection-state.json` remain
+untouched. Running `summarize` again rebuilds from all reports and may restore
+the removed month.
+
+To save to a separate file, use `--output` or `-o`:
+
+```sh
+repo-history chop-partial reports -o public/manifest.json
+```
+
+The input is preserved when the output is a different path. The output's parent
+directories are created as needed. If the input is already complete, its validated
+contents are still saved to the explicit output. The output must be a file path
+and cannot use a monthly report filename (`YYYY-MM.json`). Omitting it
+keeps the default in-place behavior.
+
+All months before the latest must be complete; any earlier ongoing month is an
+error, even when the latest month is complete. Removal also errors if it would
+leave no months. If all months are complete, an in-place run succeeds silently
+without rewriting the manifest.
+
+The input and edited result are validated before writing. The manifest is saved
+atomically, printing its destination path after saving.
+Use sequential writers or external coordination. `--quiet` suppresses saved paths
+and retains errors; `--verbose` adds diagnostics. Exit codes follow the other CLI
+commands: 0 for success, 2 for argument errors, and 1 for validation or filesystem
+failures. Repeated in-place invocations succeed silently after the partial month
+is removed.
+
+CLI commands can reuse `repo_history.manifest.resolve_manifest_path(path)` to
+resolve a file or directory to a manifest path. It accepts strings and path-like
+objects, preserves relative paths, and leaves existence and content validation
+to the reader. Commands accepting multiple inputs can apply it to each input.
 
 ## Repository collection state
 

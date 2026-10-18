@@ -141,6 +141,22 @@ def test_invalid_arguments(tmp_path, collector, arguments):
 
 
 @pytest.mark.parametrize(
+    "arguments",
+    [
+        [],
+        ["manifest.json", "--quiet", "--verbose"],
+        ["manifest.json", "--start", "2024-03"],
+        ["first.json", "second.json"],
+        ["first.json", "second.json", "--output", "output.json"],
+    ],
+)
+def test_chop_invalid_arguments(collector, arguments):
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["chop-partial", *arguments])
+    assert exc.value.code == 2 and not collector
+
+
+@pytest.mark.parametrize(
     "error",
     [
         AuthenticationError("set GH_TOKEN"),
@@ -160,7 +176,9 @@ def test_expected_errors(tmp_path, collector, monkeypatch, capsys, error):
         assert "retry after 30 seconds" in err and "reset at 2024-03-01" in err
 
 
-@pytest.mark.parametrize("command", [None, "backfill", "update", "summarize"])
+@pytest.mark.parametrize(
+    "command", [None, "backfill", "update", "summarize", "chop-partial"]
+)
 def test_help(command, capsys):
     with pytest.raises(SystemExit) as exc:
         cli.main(([command] if command else []) + ["--help"])
@@ -168,9 +186,15 @@ def test_help(command, capsys):
     out = capsys.readouterr().out
     assert "--mode" not in out and "--discovery" not in out
     if command is None:
-        assert all(name in out for name in ("backfill", "update", "summarize"))
+        assert all(
+            name in out for name in ("backfill", "update", "summarize", "chop-partial")
+        )
     elif command == "summarize":
         assert "--input-directory" in out
+    elif command == "chop-partial":
+        assert "MANIFEST" in out and "--quiet" in out and "--verbose" in out
+        assert "--output" in out and "-o" in out
+        assert "directory containing manifest.json" in out
     else:
         assert "--start" in out and "--end" in out
 

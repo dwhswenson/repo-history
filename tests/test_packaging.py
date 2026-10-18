@@ -98,6 +98,7 @@ for text in json.load(sys.stdin):
             ["backfill", "--help"],
             ["update", "--help"],
             ["summarize", "--help"],
+            ["chop-partial", "--help"],
         ):
             result = subprocess.run(
                 [*command, *arguments],
@@ -112,8 +113,11 @@ for text in json.load(sys.stdin):
                 assert "--mode" not in result.stdout
             elif arguments[0] == "summarize":
                 assert "--input-directory" in result.stdout
+            elif arguments[0] == "chop-partial":
+                assert "MANIFEST" in result.stdout
+                assert "--quiet" in result.stdout and "--verbose" in result.stdout
             else:
                 assert all(
                     name in result.stdout
-                    for name in ("backfill", "update", "summarize")
+                    for name in ("backfill", "update", "summarize", "chop-partial")
                 )
