@@ -12,6 +12,23 @@ def test_repository_query_and_reusable_fragments():
     assert "hasNextPage" in PAGE_INFO_FRAGMENT and "endCursor" in PAGE_INFO_FRAGMENT
 
 
+def test_history_queries_always_request_totals():
+    from repo_history.queries import (
+        COMMIT_HISTORY_QUERY,
+        HISTORY_ISSUES_QUERY,
+        HISTORY_PULL_REQUESTS_QUERY,
+    )
+
+    for document in (
+        HISTORY_ISSUES_QUERY,
+        HISTORY_PULL_REQUESTS_QUERY,
+        COMMIT_HISTORY_QUERY,
+    ):
+        assert document.count("totalCount") == 1
+        assert "totalCount\n" in document
+        assert "includeProgressTotal" not in document
+
+
 def test_lifecycle_queries_use_node_variables_and_independent_connections():
     from repo_history.queries import (
         ISSUE_TIMELINE_QUERY,

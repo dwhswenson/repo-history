@@ -95,17 +95,19 @@ Backfill shows a live Rich display on interactive stderr: persistent Issues, PRs
 Commits, Grouping, and Writing rows include processed/total items, percentage,
 elapsed time, and approximate per-stage ETA. The current item and operation show
 nested pagination and retries. Items advance only after their history has been processed; totals
-are advisory and unavailable totals use an indeterminate display. Totals are
-requested with the first existing page of each outer connection, without extra
-count requests. A footer updates measured GraphQL points spent by this run,
-requests, retries, unmeasured attempts, and the last observed remaining budget and
-reset time. Budget readings can become stale between responses or when other
-clients use the same credentials; unknown values are shown explicitly.
+are advisory and unavailable totals use an indeterminate display. Issue, PR, and
+commit history queries always request totals on each page, without extra count
+requests; progress uses only the first page's total. A footer updates measured
+GraphQL points spent by this run, requests, retries, unmeasured attempts, and the
+last observed remaining budget and reset time. Budget readings can become stale
+between responses or when other clients use the same credentials; unknown values
+are shown explicitly.
 
 Redirected stderr and `--verbose` use plain progress messages instead of bars.
 Stage transitions, retries, and completion/failure appear immediately; other
 updates appear at most every 30 seconds when work advances. `backfill --no-progress`
-disables the added progress output and total-count fields, retaining ordinary logs.
+disables the added progress output, retaining ordinary logs. Total-count fields
+remain in the queries even when progress is disabled.
 `--quiet` suppresses progress as well as saved paths. Grouping advances after each
 monthly report has been built and validated; writing advances after each successful
 file save and shows the current JSON filename. The live display stays active through

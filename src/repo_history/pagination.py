@@ -90,12 +90,14 @@ def iter_connection(
     if cursor is not None and (not isinstance(cursor, str) or not cursor):
         raise ValueError("initial cursor must be a nonempty string or null")
     seen = {cursor} if cursor is not None else set()
+    stage = {
+        "RepositoryIssues": "Issues",
+        "RepositoryPullRequests": "PRs",
+        "CommitHistory": "Commits",
+    }.get(operation_name)
     page_number = start_page
     while True:
         values.update({cursor_variable: cursor, page_size_variable: page_size})
-        progress_total = enabled() and "$includeProgressTotal:" in document
-        if progress_total:
-            values["includeProgressTotal"] = page_number == 1
         data, page_size = client._execute(
             document,
             values,
@@ -111,13 +113,13 @@ def iter_connection(
                 )
             connection = connection[key]
         nodes, more, next_cursor = _connection_page(connection, operation_name, seen)
-        if progress_total and page_number == 1:
-            stage = {
-                "RepositoryIssues": "Issues",
-                "RepositoryPullRequests": "PRs",
-                "CommitHistory": "Commits",
-            }[operation_name]
-            emit("total", stage=stage, total=connection.get("totalCount"))
+        if (
+            enabled()
+            and page_number == 1
+            and stage is not None
+            and "totalCount" in connection
+        ):
+            emit("total", stage=stage, total=connection["totalCount"])
         yield from nodes
         if not more:
             return

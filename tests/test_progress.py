@@ -8,14 +8,17 @@ from datetime import datetime, timezone
 import pytest
 import requests
 
-from repo_history import GraphQLError
+from repo_history import GraphQLError, PaginationError
 from repo_history import _terminal as terminal
 from repo_history._progress import Usage, emit, enabled, listen
 from repo_history._terminal import BackfillProgress
-from repo_history.queries import HISTORY_ISSUES_QUERY
+from repo_history.queries import (
+    COMMIT_HISTORY_QUERY,
+    HISTORY_ISSUES_QUERY,
+    HISTORY_PULL_REQUESTS_QUERY,
+)
 
 from .helpers import Response, errors
-from .test_collection import connection
 
 
 class TTY(io.StringIO):
@@ -41,35 +44,167 @@ def test_listener_restores_nested_context_on_error():
     assert [e.kind for e in second] == ["start"]
 
 
+@pytest.fixture(
+    params=[
+        (HISTORY_ISSUES_QUERY, "RepositoryIssues", ("node", "issues"), "Issues"),
+        (
+            HISTORY_PULL_REQUESTS_QUERY,
+            "RepositoryPullRequests",
+            ("node", "pullRequests"),
+            "PRs",
+        ),
+        (
+            COMMIT_HISTORY_QUERY,
+            "CommitHistory",
+            ("node", "object", "history"),
+            "Commits",
+        ),
+    ],
+    ids=["issues", "pull_requests", "commits"],
+)
+def history_connection(request):
+    return request.param
+
+
+def progress_page(path, nodes=(), *, total=..., more=False, cursor=None):
+    data = {
+        "nodes": list(nodes),
+        "pageInfo": {"hasNextPage": more, "endCursor": cursor},
+    }
+    if total is not ...:
+        data["totalCount"] = total
+    for field in reversed(path):
+        data = {field: data}
+    return Response({"data": data})
+
+
 @pytest.mark.parametrize("active", [False, True])
-def test_totals_only_requested_on_first_page(client, active):
-    first = connection("issues", [{"number": 1}], more=True, cursor="next")
-    first.body["data"]["node"]["issues"]["totalCount"] = 2
-    second = connection("issues", [{"number": 2}])
-    second.body["data"]["node"]["issues"]["totalCount"] = 999
+def test_totals_always_requested_but_only_first_page_consumed(
+    client, history_connection, active
+):
+    document, operation, path, stage = history_connection
+    first = progress_page(path, [{"id": "a"}], total=2, more=True, cursor="next")
+    second = progress_page(path, [{"id": "b"}], total=999)
     client._session.responses = [errors("MAX_NODE_LIMIT_EXCEEDED"), first, second]
+    variables = {"id": "R"}
+    if operation == "CommitHistory":
+        variables["head"] = "a" * 40
     events = []
     with listen(events.append if active else None):
         values = list(
             client.iter_connection(
-                HISTORY_ISSUES_QUERY,
-                {"id": "R"},
-                operation_name="RepositoryIssues",
-                connection_path=("node", "issues"),
+                document,
+                variables,
+                operation_name=operation,
+                connection_path=path,
                 page_size=20,
             )
         )
-    assert len(values) == 2
-    variables = [call[1]["json"]["variables"] for call in client._session.calls]
+    assert values == [{"id": "a"}, {"id": "b"}]
+    payloads = [call[1]["json"] for call in client._session.calls]
+    assert all(p["query"] == document for p in payloads)
+    assert all("includeProgressTotal" not in p["variables"] for p in payloads)
+    assert [p["variables"] for p in payloads] == [
+        {**variables, "first": 20, "after": None},
+        {**variables, "first": 10, "after": None},
+        {**variables, "first": 10, "after": "next"},
+    ]
+    assert "after" not in variables and "first" not in variables
     if active:
-        assert [v["includeProgressTotal"] for v in variables] == [True, True, False]
-        assert [(e.stage, e.total) for e in events if e.kind == "total"] == [
-            ("Issues", 2)
-        ]
+        assert [(e.stage, e.total) for e in events if e.kind == "total"] == [(stage, 2)]
         assert not any(e.kind == "advance" for e in events)
     else:
-        assert all("includeProgressTotal" not in v for v in variables)
         assert not events
+
+
+@pytest.mark.parametrize("active", [False, True])
+@pytest.mark.parametrize("start_page", [1, 2])
+def test_empty_connections_and_resumed_pages(
+    client, history_connection, active, start_page
+):
+    document, operation, path, stage = history_connection
+    client._session.responses = [progress_page(path, total=0)]
+    events = []
+    variables = {"id": "R"}
+    if start_page == 2:
+        variables["after"] = "previous"
+    with listen(events.append if active else None):
+        assert (
+            list(
+                client.iter_connection(
+                    document,
+                    variables,
+                    operation_name=operation,
+                    connection_path=path,
+                    start_page=start_page,
+                )
+            )
+            == []
+        )
+    totals = [(e.stage, e.total) for e in events if e.kind == "total"]
+    assert totals == ([(stage, 0)] if active and start_page == 1 else [])
+    payload = client._session.calls[0][1]["json"]
+    assert payload["query"] == document
+    assert payload["variables"] == {
+        **variables,
+        "after": variables.get("after"),
+        "first": 100,
+    }
+
+
+@pytest.mark.parametrize("total", [..., -1])
+def test_missing_and_invalid_page_totals_are_advisory(
+    client, history_connection, total
+):
+    document, operation, path, stage = history_connection
+    client._session.responses = [
+        progress_page(path, [{"id": "a"}], total=total, more=True, cursor="next"),
+        progress_page(path, [{"id": "b"}], total=2),
+    ]
+    with BackfillProgress(io.StringIO()) as display:
+        emit("start", stage=stage)
+        assert list(
+            client.iter_connection(
+                document, {"id": "R"}, operation_name=operation, connection_path=path
+            )
+        ) == [{"id": "a"}, {"id": "b"}]
+        assert display.stages[stage].total is None
+
+
+def test_unknown_operations_do_not_emit_totals(client):
+    path = ("node", "items")
+    client._session.responses = [progress_page(path, total=0)]
+    events = []
+    with listen(events.append):
+        assert (
+            list(
+                client.iter_connection(
+                    "query Test { node { items { totalCount } } }",
+                    {},
+                    operation_name="Test",
+                    connection_path=path,
+                )
+            )
+            == []
+        )
+    assert not any(e.kind == "total" for e in events)
+
+
+def test_malformed_page_does_not_emit_total(client):
+    path = ("node", "issues")
+    response = progress_page(path, total=1, more=True)
+    client._session.responses = [response]
+    events = []
+    with listen(events.append), pytest.raises(PaginationError):
+        list(
+            client.iter_connection(
+                HISTORY_ISSUES_QUERY,
+                {"id": "R"},
+                operation_name="RepositoryIssues",
+                connection_path=path,
+            )
+        )
+    assert not any(e.kind == "total" for e in events)
 
 
 def test_usage_snapshots_cover_every_attempt_and_preserve_budget(client):
