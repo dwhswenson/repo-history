@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from time import perf_counter
 
 from ._progress import emit
+from ._timing import phase_elapsed
 from .collection import COVERAGE_LIMITATIONS, _collect_parent, _month_bounds, _Records
 from .commits import BOUNDED_LIMITATION, collect_commits
 from .discovery import BOUNDED_DISCOVERY_LIMITATION, discover_parents, select_strategy
@@ -15,7 +16,7 @@ from .models import CommitMetadata, MonthlyReport, RepositoryHistory
 from .provenance import make_run, report_metadata
 from .reports import build_report
 from .repository import lookup_repository
-from .transport import GraphQLClient
+from .transport import GraphQLClient, _APIUsage
 
 LOG = logging.getLogger(__name__)
 
@@ -60,16 +61,17 @@ def _collect_snapshot(
     end=None,
 ):
     """Collect one interval (or full history) with actual strategy provenance."""
-    if any(
-        not isinstance(value, str) or not value.strip() or "/" in value
-        for value in (owner, repo)
-    ):
-        raise ValueError("owner and repo must be nonempty names without slashes")
-    started = _utc_now() if started is None else started
     timer = perf_counter()
-    with GraphQLClient(token) as client:
-        completed = False
-        try:
+    client = None
+    completed = False
+    try:
+        if any(
+            not isinstance(value, str) or not value.strip() or "/" in value
+            for value in (owner, repo)
+        ):
+            raise ValueError("owner and repo must be nonempty names without slashes")
+        started = _utc_now() if started is None else started
+        with GraphQLClient(token) as client:
             repository = lookup_repository(client, owner, repo)
             if (
                 expected_repository_id is not None
@@ -127,7 +129,6 @@ def _collect_snapshot(
                     )
                 ),
             )
-            completed = True
             result = replace(
                 result,
                 run=make_run(
@@ -140,24 +141,30 @@ def _collect_snapshot(
                     commits=commit_strategy,
                 ),
             )
-            return result, discovery, commit_strategy
-        finally:
-            rest, graphql = client._api_usage["rest"], client._api_usage["graphql"]
-            LOG.info(
-                "History collection status=%s elapsed_seconds=%.3f "
-                "REST requests=%s retries=%s points=%s unmeasured_attempts=%s "
-                "GraphQL requests=%s retries=%s points=%s unmeasured_attempts=%s",
-                "completed" if completed else "failed",
-                perf_counter() - timer,
-                rest.attempts,
-                rest.retries,
-                rest.points,
-                rest.unmeasured_attempts,
-                graphql.attempts,
-                graphql.retries,
-                graphql.points,
-                graphql.unmeasured_attempts,
-            )
+        completed = True
+        return result, discovery, commit_strategy
+    finally:
+        usage = (
+            client._api_usage
+            if client is not None
+            else {"rest": _APIUsage(), "graphql": _APIUsage()}
+        )
+        rest, graphql = usage["rest"], usage["graphql"]
+        LOG.info(
+            "History collection status=%s elapsed_seconds=%.3f "
+            "REST requests=%s retries=%s points=%s unmeasured_attempts=%s "
+            "GraphQL requests=%s retries=%s points=%s unmeasured_attempts=%s",
+            "completed" if completed else "failed",
+            phase_elapsed(timer),
+            rest.attempts,
+            rest.retries,
+            rest.points,
+            rest.unmeasured_attempts,
+            graphql.attempts,
+            graphql.retries,
+            graphql.points,
+            graphql.unmeasured_attempts,
+        )
 
 
 def history_to_months(

@@ -10,6 +10,7 @@ from pathlib import Path
 from time import perf_counter
 
 from ._progress import emit
+from ._timing import backfill_timing, timed_phase
 from .collection import _month_bounds
 from .history import _collect_history, history_to_months
 from .writing import _check_directory, _write_report
@@ -65,89 +66,100 @@ def _run_backfill(
     now: datetime | None = None,
     command: str = "backfill",
 ) -> list[Path]:
-    _validate_request(owner, repo)
-    now = _utc_now() if now is None else now
-    requested_end = end
-    end = _validate_optional_range(start, end, now)
-    emit("phase", stage="Preparing", detail="Validating destination")
-    repository_id = _check_directory(Path(output_directory))
-    emit("phase", stage="Preparing", detail="Looking up repository")
-    history = _collect_history(
-        owner, repo, token=token, expected_repository_id=repository_id, started=now
-    )
-    from .provenance import make_run
-    from .state import write_collection_state
-    from .writing import directory_repository
+    with backfill_timing(LOG):
+        with timed_phase(LOG, "Backfill preparation"):
+            _validate_request(owner, repo)
+            now = _utc_now() if now is None else now
+            requested_end = end
+            end = _validate_optional_range(start, end, now)
+            emit("phase", stage="Preparing", detail="Validating destination")
+            repository_id = _check_directory(Path(output_directory))
+            emit("phase", stage="Preparing", detail="Looking up repository")
+        history = _collect_history(
+            owner, repo, token=token, expected_repository_id=repository_id, started=now
+        )
+        with timed_phase(LOG, "History grouping/writing monthly"):
+            timer = perf_counter()
+            from .provenance import make_run
+            from .state import write_collection_state
+            from .writing import directory_repository
 
-    run = make_run(
-        command,
-        history.collection_started_at,
-        history.collection_finished_at,
-        parents="full",
-        commits="full",
-        requested_start=start,
-        requested_end=requested_end,
-    )
-    history = replace(history, run=run)
-    prior_repository = directory_repository(Path(output_directory))
-    timer = perf_counter()
-    completed = False
-    paths = []
-    try:
-        emit(
-            "start", stage="Grouping", detail="Grouping and validating monthly reports"
-        )
-        effective_start = start
-        if (
-            start is None
-            and prior_repository is not None
-            and prior_repository.history_start_month is not None
-        ):
-            earliest = min(
-                [
-                    history.repository_created_at,
-                    *(a.occurred_at for a in history.activities),
-                ]
+            run = make_run(
+                command,
+                history.collection_started_at,
+                history.collection_finished_at,
+                parents="full",
+                commits="full",
+                requested_start=start,
+                requested_end=requested_end,
             )
-            effective_start = min(
-                prior_repository.history_start_month,
-                f"{earliest.year:04d}-{earliest.month:02d}",
+            history = replace(history, run=run)
+            prior_repository = directory_repository(Path(output_directory))
+            paths = []
+            emit(
+                "start",
+                stage="Grouping",
+                detail="Grouping and validating monthly reports",
             )
-        reports = history_to_months(history, effective_start, end)
-        emit(
-            "complete",
-            stage="Grouping",
-            detail=f"Validated {len(reports)} monthly reports",
-        )
-        # All selected reports have been validated before any replacement.
-        LOG.info(
-            "History grouped months=%s elapsed_seconds=%.3f",
-            len(reports),
-            perf_counter() - timer,
-        )
-        emit("start", stage="Writing", detail=f"Writing {len(reports)} monthly reports")
-        emit("total", stage="Writing", total=len(reports))
-        for report in reports:
-            emit("detail", detail=f"{report.metadata.month}.json")
-            path = _write_report(
-                report, output_directory, previous_repository=prior_repository
+            effective_start = start
+            if (
+                start is None
+                and prior_repository is not None
+                and prior_repository.history_start_month is not None
+            ):
+                earliest = min(
+                    [
+                        history.repository_created_at,
+                        *(a.occurred_at for a in history.activities),
+                    ]
+                )
+                effective_start = min(
+                    prior_repository.history_start_month,
+                    f"{earliest.year:04d}-{earliest.month:02d}",
+                )
+            reports = history_to_months(history, effective_start, end)
+            emit(
+                "complete",
+                stage="Grouping",
+                detail=f"Validated {len(reports)} monthly reports",
             )
-            paths.append(path)
-            emit("advance", stage="Writing")
-            if on_written is not None:
-                on_written(path)
-        write_collection_state(output_directory, run, history=history)
-        emit("complete", stage="Writing", detail=f"Saved {len(paths)} monthly reports")
-        emit("finish", stage="Completed", detail=f"Saved {len(paths)} monthly reports")
-        completed = True
+            # All selected reports have been validated before any replacement.
+            LOG.debug(
+                "History grouped months=%s elapsed_seconds=%.3f",
+                len(reports),
+                perf_counter() - timer,
+            )
+            emit(
+                "start",
+                stage="Writing",
+                detail=f"Writing {len(reports)} monthly reports",
+            )
+            emit("total", stage="Writing", total=len(reports))
+            destination = Path(output_directory).absolute()
+            for report in reports:
+                emit(
+                    "detail", detail=str(destination / f"{report.metadata.month}.json")
+                )
+                path = _write_report(
+                    report, output_directory, previous_repository=prior_repository
+                )
+                paths.append(path)
+                emit("advance", stage="Writing")
+                if on_written is not None:
+                    on_written(path)
+            emit(
+                "complete",
+                stage="Writing",
+                detail=f"Saved {len(paths)} monthly reports",
+            )
+        with timed_phase(LOG, "History inventory/verification"):
+            write_collection_state(output_directory, run, history=history)
+            emit(
+                "finish",
+                stage="Completed",
+                detail=f"Saved {len(paths)} monthly reports",
+            )
         return paths
-    finally:
-        LOG.info(
-            "History grouping/writing status=%s saved_months=%s elapsed_seconds=%.3f",
-            "completed" if completed else "failed",
-            len(paths),
-            perf_counter() - timer,
-        )
 
 
 def backfill(

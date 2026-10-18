@@ -110,6 +110,7 @@ class _CommandProgress(AbstractContextManager):
         )
         self.stages = {name: _Stage() for name in self.stage_names}
         self.active = "Preparing"
+        self.phase_running = True
         self.item = ""
         self.detail = self.preparation
         self.usage = Usage()
@@ -166,7 +167,7 @@ class _CommandProgress(AbstractContextManager):
         work.add_column(width=2)
         work.add_column(ratio=1)
         work.add_row(
-            self.activity if self.active == "Preparing" else Text(""),
+            self.activity if self.phase_running else Text(""),
             Text(f"{self.active}: {self.detail}"),
         )
         rows = [self.progress, work]
@@ -214,6 +215,7 @@ class _CommandProgress(AbstractContextManager):
         if event.usage is not None:
             self.usage = event.usage
         if event.kind in {"start", "skipped"}:
+            self.phase_running = False
             self.active = event.stage
             self.item = ""
             self.detail = event.detail or "Processing"
@@ -232,6 +234,7 @@ class _CommandProgress(AbstractContextManager):
             state.total = state.completed
             self.detail = event.detail or "Completed"
         elif event.kind in {"phase", "finish"}:
+            self.phase_running = event.kind == "phase" and state is None
             self.active = event.stage
             self.item = ""
             self.detail = event.detail
@@ -281,6 +284,7 @@ class _CommandProgress(AbstractContextManager):
                 self._plain()
         finally:
             try:
+                self.phase_running = False
                 if self.live is not None:
                     self.live.stop()
             finally:
@@ -292,7 +296,15 @@ class _CommandProgress(AbstractContextManager):
 
 class BackfillProgress(_CommandProgress):
     label = "Backfill"
-    stage_names = ("Issues", "PRs", "Commits", "Grouping", "Writing")
+    stage_names = (
+        "Issues",
+        "PRs",
+        "Commits",
+        "Grouping",
+        "Writing",
+        "Inventory",
+        "Verification",
+    )
     preparation = "Validating destination and looking up repository"
     show_usage = True
 

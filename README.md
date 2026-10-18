@@ -96,8 +96,8 @@ invalid arguments, and 1 for collection, validation, or filesystem failures.
 Rate-limit errors include available retry/reset guidance and stop the run.
 
 Backfill shows a live Rich display on interactive stderr: persistent Issues, PRs,
-Commits, Grouping, and Writing rows include processed/total items, percentage,
-elapsed time, and approximate per-stage ETA. The current item and operation show
+Commits, Grouping, Writing, Inventory, and Verification rows include processed/total items,
+percentage, elapsed time, and approximate per-stage ETA. The current item and operation show
 nested pagination and retries. Items advance only after their history has been processed; totals
 are advisory and unavailable totals use an indeterminate display. Issue, PR, and
 commit history queries always request totals on each page, without extra count
@@ -114,8 +114,14 @@ disables the added progress output, retaining ordinary logs. Total-count fields
 remain in the queries even when progress is disabled.
 `--quiet` suppresses progress as well as saved paths. Grouping advances after each
 monthly report has been built and validated; writing advances after each successful
-file save and shows the current JSON filename. The live display stays active through
-writing and replaces the scrolling saved-path list when stdout is a terminal.
+file save and shows the full path of the current monthly JSON file. Writing completes
+after the last monthly file is saved. Inventory has its own progress bar, advancing
+after each report is read, validated, and hashed. Collection-state writing and
+publishing use a separate status line with a spinner. Verification
+has its own progress bar checking each report against the temporary state file,
+with the current operation, report number, and full path shown below it.
+The live display stays active through collection-state processing
+and replaces the scrolling saved-path list when stdout is a terminal.
 Redirected stdout still receives each saved path immediately, including with live
 progress on stderr; plain/verbose mode and `--no-progress` retain path output.
 These collection stages are specific to the backfill CLI; Python calls and

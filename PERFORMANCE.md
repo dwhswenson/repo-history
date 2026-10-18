@@ -111,7 +111,25 @@ submitted reviews, inline comments, replies, and publication of previously
 drafted comments. Include old closed/merged parents and disabled issues. Matching
 samples increase confidence without proving a universal API guarantee.
 
-Collection logs already report elapsed time, attempts/retries, measured points,
-and unmeasured attempts on success and failure. Backfill also logs offline
-grouping and writing time. Persistent caching, concurrency, and incremental
-checkpoint consumption remain separate future work.
+Backfill INFO timing records cover four non-overlapping phases, on success or
+failure:
+
+- Preparation: request validation and checking destination reports.
+- History collection: client initialization, repository lookup, collection and
+  retries, normalization, and client cleanup. This record also includes API usage.
+- Grouping/writing monthly: provenance setup, reading prior repository metadata,
+  monthly projection and validation, file writes, and saved-path callbacks.
+- Inventory/verification: building the inventory and checkpoint, writing the
+  temporary collection state, final verification, publishing, and temporary-file
+  cleanup.
+
+Add these records' `elapsed_seconds` values to compare against the final
+`Backfill summary`. That summary reports `total_elapsed_seconds`,
+`phase_elapsed_seconds`, and their difference, `unaccounted_seconds`; its total
+is not another additive phase. The CLI total includes argument parsing, display
+setup, and display cleanup; library calls measure the backfill operation itself.
+Interpreter startup and imports before CLI entry are outside the total. The
+overlapping grouping-only timing is DEBUG rather than INFO.
+
+Persistent caching, concurrency, and incremental checkpoint consumption remain
+separate future work.

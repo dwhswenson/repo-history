@@ -1,11 +1,19 @@
 """Full-history backfill defaults, validation, and replacement."""
 
 import importlib
+import io
 from datetime import datetime, timezone
 
 import pytest
 
-from repo_history import RepositoryHistory, backfill, report_from_json, report_to_json
+from repo_history import (
+    RepositoryHistory,
+    backfill,
+    report_from_json,
+    report_to_json,
+    state,
+)
+from repo_history._terminal import BackfillProgress
 
 from .helpers import replace
 
@@ -71,6 +79,137 @@ def test_inclusive_range_and_replacement(tmp_path, collector):
         report_from_json(paths[2].read_text()).metadata.month_end
         - report_from_json(paths[2].read_text()).metadata.month_start
     ).days == 29
+
+
+@pytest.mark.parametrize("failure", [None, "inventory", "verification", "publishing"])
+def test_monthly_writing_completes_before_collection_state(
+    tmp_path, collector, monkeypatch, failure
+):
+    monkeypatch.chdir(tmp_path)
+    display = BackfillProgress(io.StringIO())
+    write_report = module._write_report
+    read_report = state.report_from_json
+    temporary_file = state.tempfile.NamedTemporaryFile
+    publish = state.os.replace
+    observed = []
+    checks = []
+    state_writes = []
+
+    def monthly(report, *args, **kwargs):
+        path = tmp_path / "reports" / f"{report.metadata.month}.json"
+        assert display.active == "Writing"
+        assert display.detail == str(path)
+        assert display.stages["Writing"].status == "running"
+        assert display.stages["Inventory"].status == "pending"
+        assert display.stages["Verification"].status == "pending"
+        observed.append(path)
+        return write_report(report, *args, **kwargs)
+
+    def check_report(raw):
+        assert display.stages["Writing"].status == "completed"
+        assert display.stages["Writing"].completed == 3
+        assert display.progress.tasks[display.tasks["Writing"]].finished
+        assert all(path.exists() for path in observed)
+        if len(checks) < 3:
+            assert display.active == "Inventory"
+            assert not display.phase_running
+            assert display.stages["Inventory"].status == "running"
+            assert display.stages["Inventory"].completed == len(checks)
+            assert display.stages["Inventory"].total == 3
+            assert display.stages["Verification"].status == "pending"
+        else:
+            assert display.stages["Inventory"].status == "completed"
+            assert display.stages["Inventory"].completed == 3
+            assert display.progress.tasks[display.tasks["Inventory"]].finished
+            assert display.active == "Verification"
+            assert not display.phase_running
+            assert display.stages["Verification"].status == "running"
+            assert display.stages["Verification"].completed == len(checks) - 3
+            assert display.stages["Verification"].total == 3
+        checks.append(display.detail)
+        if failure == "inventory" and len(checks) == 2:
+            raise OSError("state inventory failed")
+        if failure == "verification" and len(checks) == 5:
+            raise OSError("state verification failed")
+        return read_report(raw)
+
+    def write_state_file(*args, **kwargs):
+        if kwargs.get("prefix") == ".collection-state.":
+            assert display.active == "Collection state"
+            assert display.phase_running
+            assert display.stages["Inventory"].status == "completed"
+            assert display.stages["Verification"].status == "pending"
+            assert display.stages["Verification"].completed == 0
+            assert (
+                display.detail == f"Writing {tmp_path / 'reports' / state.STATE_FILE}"
+            )
+            state_writes.append(display.detail)
+        return temporary_file(*args, **kwargs)
+
+    def publish_state(source, target):
+        if target.name == state.STATE_FILE:
+            assert display.active == "Collection state"
+            assert display.phase_running
+            assert display.stages["Verification"].status == "completed"
+            assert display.stages["Verification"].completed == 3
+            assert display.progress.tasks[display.tasks["Verification"]].finished
+            if failure == "publishing":
+                raise OSError("state publishing failed")
+        return publish(source, target)
+
+    monkeypatch.setattr(module, "_write_report", monthly)
+    monkeypatch.setattr(state, "report_from_json", check_report)
+    monkeypatch.setattr(state.tempfile, "NamedTemporaryFile", write_state_file)
+    monkeypatch.setattr(state.os, "replace", publish_state)
+
+    def run():
+        with display:
+            backfill("o", "r", output_directory="reports")
+
+    if failure:
+        with pytest.raises(OSError, match=f"state {failure} failed"):
+            run()
+    else:
+        run()
+    assert len(observed) == 3
+    expected = [
+        f"{operation}: report {index}/3: {path}"
+        for operation in (
+            "Building inventory",
+            "Verifying saved state",
+        )
+        for index, path in enumerate(observed, 1)
+    ]
+    checked = {"inventory": 2, "verification": 5}.get(failure, 6)
+    assert checks == expected[:checked]
+    assert len(state_writes) == (0 if failure == "inventory" else 1)
+    assert "Collection state" not in display.tasks
+    assert display.stages["Writing"].status == "completed"
+    assert display.stages["Inventory"].status == (
+        "failed" if failure == "inventory" else "completed"
+    )
+    assert display.stages["Inventory"].completed == (1 if failure == "inventory" else 3)
+    assert display.stages["Verification"].status == (
+        "pending"
+        if failure == "inventory"
+        else "failed"
+        if failure == "verification"
+        else "completed"
+    )
+    assert display.stages["Verification"].completed == (
+        0 if failure == "inventory" else 1 if failure == "verification" else 3
+    )
+    assert display.active == (
+        "Inventory"
+        if failure == "inventory"
+        else "Verification"
+        if failure == "verification"
+        else "Collection state"
+        if failure == "publishing"
+        else "Completed"
+    )
+    assert not display.phase_running
+    assert not list((tmp_path / "reports").glob("*.tmp"))
 
 
 @pytest.mark.parametrize(

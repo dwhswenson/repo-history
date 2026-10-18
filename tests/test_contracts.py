@@ -159,6 +159,32 @@ def test_failure_does_not_advance_state(session, tmp_path, monkeypatch):
     assert all(p.exists() for p in paths)
 
 
+@pytest.mark.parametrize("corruption", ["schema", "inventory"])
+def test_final_verification_rejects_corrupt_state_before_publish(
+    session, tmp_path, monkeypatch, corruption
+):
+    import repo_history.state as module
+
+    api.backfill("o", "r", output_directory=tmp_path, token="test")
+    original = (tmp_path / STATE_FILE).read_bytes()
+    dumps = module.json.dumps
+
+    def corrupt_state(data, *args, **kwargs):
+        if isinstance(data, dict) and "last_applied_run" in data:
+            data = copy.deepcopy(data)
+            if corruption == "schema":
+                data["schema_version"] = "invalid"
+            else:
+                data["reports"][next(iter(data["reports"]))] = "0" * 64
+        return dumps(data, *args, **kwargs)
+
+    monkeypatch.setattr(module.json, "dumps", corrupt_state)
+    with pytest.raises(api.ReportValidationError):
+        api.backfill("o", "r", output_directory=tmp_path, token="test")
+    assert (tmp_path / STATE_FILE).read_bytes() == original
+    assert not list(tmp_path.glob("*.tmp"))
+
+
 def test_unmaterialized_future_activity_prevents_baseline(session, tmp_path):
     snapshot = api.collect_history("o", "r", token="test")
     run = make_run(

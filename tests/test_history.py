@@ -433,7 +433,7 @@ def test_destination_scanned_once_and_writing_failure_preserves_completed(
     assert not (tmp_path / "2024-02.json").exists()
     assert len([e for e in events if e.kind == "advance" and e.stage == "Writing"]) == 1
     assert not any(e.kind == "complete" and e.stage == "Writing" for e in events)
-    assert events[-1].detail == "2024-02.json"
+    assert events[-1].detail == str(tmp_path / "2024-02.json")
 
 
 def test_invalid_later_report_does_not_write_earlier_month(session, tmp_path):
@@ -777,6 +777,10 @@ def test_progress_preserves_reports_and_request_counts(session, tmp_path):
         ("complete", "Grouping"),
         ("start", "Writing"),
         ("complete", "Writing"),
+        ("start", "Inventory"),
+        ("complete", "Inventory"),
+        ("start", "Verification"),
+        ("complete", "Verification"),
     ]
     assert Counter(e.stage for e in events if e.kind == "advance") == {
         "Issues": 1,
@@ -784,6 +788,8 @@ def test_progress_preserves_reports_and_request_counts(session, tmp_path):
         "Commits": 2,
         "Grouping": 3,
         "Writing": 3,
+        "Inventory": 3,
+        "Verification": 3,
     }
     assert [(e.stage, e.total) for e in events if e.kind == "total"] == [
         ("Issues", 1),
@@ -791,6 +797,8 @@ def test_progress_preserves_reports_and_request_counts(session, tmp_path):
         ("Commits", 2),
         ("Grouping", 3),
         ("Writing", 3),
+        ("Inventory", 3),
+        ("Verification", 3),
     ]
     pr_complete = next(
         i for i, e in enumerate(events) if e.kind == "advance" and e.stage == "PRs"

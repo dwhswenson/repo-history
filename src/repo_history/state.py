@@ -6,6 +6,7 @@ import os
 import tempfile
 from pathlib import Path
 
+from ._progress import emit
 from .contracts import (
     choose_repository,
     load_contract,
@@ -104,13 +105,23 @@ def validate_collection_state(data):
     )
 
 
-def _inventory(directory):
+def _inventory(directory, *, operation=None, progress=None):
     from .writing import MONTHLY_FILE
 
+    paths = [
+        path
+        for path in sorted(directory.iterdir())
+        if MONTHLY_FILE.fullmatch(path.name) and not path.is_dir()
+    ]
+    if progress is not None:
+        emit("total", stage=progress, total=len(paths))
     records, inventory = [], {}
-    for path in sorted(directory.iterdir()):
-        if not MONTHLY_FILE.fullmatch(path.name) or path.is_dir():
-            continue
+    for index, path in enumerate(paths, 1):
+        if operation is not None:
+            emit(
+                "detail",
+                detail=f"{operation}: report {index}/{len(paths)}: {path.absolute()}",
+            )
         raw = path.read_bytes()
         report = report_from_json(raw.decode("utf-8"))
         require(
@@ -120,13 +131,27 @@ def _inventory(directory):
         )
         inventory[path.stem] = hashlib.sha256(raw).hexdigest()
         records.append(report)
+        if progress is not None:
+            emit("advance", stage=progress)
     return records, inventory
 
 
 def verify_collection_state(data, directory):
     """Reject missing, added, or changed reports and mismatched baseline metadata."""
+    _verify_collection_state(data, directory)
+
+
+def _verify_collection_state(data, directory, *, operation=None):
+    if operation is not None:
+        emit("detail", detail=f"{operation}: validating metadata")
     validate_collection_state(data)
-    records, inventory = _inventory(Path(directory))
+    records, inventory = _inventory(
+        Path(directory),
+        operation=operation,
+        progress="Verification" if operation is not None else None,
+    )
+    if operation is not None:
+        emit("detail", detail=f"{operation}: checking repository and checkpoint")
     require(
         inventory == data["reports"],
         "$.reports",
@@ -175,7 +200,12 @@ def verify_collection_state(data, directory):
 
 def write_collection_state(directory, run, *, history=None):
     directory = Path(directory)
-    records, inventory = _inventory(directory)
+    emit("start", stage="Inventory", detail="Building inventory")
+    records, inventory = _inventory(
+        directory, operation="Building inventory", progress="Inventory"
+    )
+    emit("complete", stage="Inventory", detail=f"Inventoried {len(records)} reports")
+    emit("phase", stage="Collection state", detail="Building checkpoint")
     require(bool(records), "$.reports", "state requires monthly reports")
     repo = choose_repository(r.metadata.repository for r in records)
     raw_run = to_data(run)
@@ -217,10 +247,10 @@ def write_collection_state(directory, run, *, history=None):
                     "default_branch_head": history.default_branch_head,
                 },
             }
-    verify_collection_state(data, directory)
     path = directory / STATE_FILE
     temporary = None
     try:
+        emit("phase", stage="Collection state", detail=f"Writing {path.absolute()}")
         with tempfile.NamedTemporaryFile(
             mode="w",
             encoding="utf-8",
@@ -232,8 +262,16 @@ def write_collection_state(directory, run, *, history=None):
             temporary = Path(stream.name)
             stream.write(json.dumps(data, indent=2, sort_keys=True) + "\n")
             stream.flush()
-        verify_collection_state(json.loads(temporary.read_text()), directory)
+        emit("start", stage="Verification", detail="Verifying saved state")
+        _verify_collection_state(
+            json.loads(temporary.read_text()),
+            directory,
+            operation="Verifying saved state",
+        )
+        emit("complete", stage="Verification", detail="Verified collection state")
+        emit("phase", stage="Collection state", detail=f"Publishing {path.absolute()}")
         os.replace(temporary, path)
+        emit("phase", stage="Collection state", detail=f"Saved {path.absolute()}")
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)

@@ -6,7 +6,9 @@ import sys
 from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
+from time import perf_counter
 
+from ._timing import backfill_timing
 from .backfill import _run_backfill, _validate_optional_range, _validate_request
 from .errors import GitHubAPIError, RateLimitError
 from .manifest import write_manifest
@@ -95,6 +97,7 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    timer = perf_counter()
     parser = _parser()
     args = parser.parse_args(argv)
     now = _utc_now()
@@ -150,7 +153,10 @@ def main(argv: list[str] | None = None) -> int:
                 )
             saved(path)
         elif args.command == "backfill":
-            with progress if progress is not None else nullcontext():
+            with (
+                backfill_timing(LOG, started=timer),
+                progress if progress is not None else nullcontext(),
+            ):
                 _run_backfill(
                     *args.repository,
                     args.start,
