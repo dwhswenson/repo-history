@@ -1,4 +1,4 @@
-"""Offline, validated summary manifests for the browser visualizer."""
+"""Offline, validated history summaries for the browser visualizer."""
 
 import json
 import logging
@@ -14,8 +14,8 @@ from .serialization import report_from_json, to_data
 from .validation import validate_report
 from .writing import MONTHLY_FILE
 
-METADATA_KEYS = ("month", "month_start", "month_end", "ongoing")
-CLASSES = ("human", "bot", "unresolved_git")
+METADATA_KEYS = ("month", "month_start", "month_end", "is_partial")
+CLASSES = ("human", "bot", "unlinked_git")
 LOG = logging.getLogger(__name__)
 
 
@@ -95,7 +95,7 @@ def _sum_summaries(summaries, actors):
     }
 
 
-def validate_manifest(data: dict) -> None:
+def validate_summary(data: dict) -> None:
     """Validate sources, coverage, and the prepared aggregate chart summaries."""
     from .contracts import (
         require,
@@ -105,7 +105,7 @@ def validate_manifest(data: dict) -> None:
         validate_structure,
     )
 
-    validate_structure("viz-manifest", data)
+    validate_structure("viz-summary", data)
     runs, repositories, source_repositories = {}, {}, {}
     for repo in data["repositories"]:
         key = repo["node_id"]
@@ -159,10 +159,10 @@ def validate_manifest(data: dict) -> None:
                         f"missing report for {key} in {m['month']}",
                     )
         require(
-            m["ongoing"]
-            == any(s["metadata"]["ongoing"] for s in entry["source_reports"]),
+            m["is_partial"]
+            == any(s["metadata"]["is_partial"] for s in entry["source_reports"]),
             path,
-            "ongoing disagrees with sources",
+            "is_partial disagrees with sources",
         )
         _validate_summary(entry["summaries"], data["actors"], path)
         require(
@@ -197,14 +197,14 @@ def validate_manifest(data: dict) -> None:
     )
 
 
-def build_manifest(
+def build_summary(
     reports: Iterable[MonthlyReport], *, display_name: str | None = None
 ) -> dict:
     """Validate full reports sequentially and retain only visualization data."""
-    return _build_manifest(reports, check_reports=True, display_name=display_name)
+    return _build_summary(reports, check_reports=True, display_name=display_name)
 
 
-def _build_manifest(
+def _build_summary(
     reports: Iterable[MonthlyReport],
     *,
     check_reports: bool,
@@ -256,21 +256,21 @@ def _build_manifest(
         "actors": dict(sorted(actors.items())),
         "months": sorted(months, key=lambda item: item["metadata"]["month"]),
     }
-    validate_manifest(data)
+    validate_summary(data)
     return data
 
 
-def write_manifest(
+def write_summary(
     report_directory: str | os.PathLike,
     *,
     output_path: str | os.PathLike | None = None,
     display_name: str | None = None,
 ) -> Path:
-    """Rebuild an atomic manifest; source reports must not change concurrently."""
+    """Rebuild an atomic summary; source reports must not change concurrently."""
     directory = Path(report_directory)
-    target = directory / "manifest.json" if output_path is None else Path(output_path)
+    target = directory / "summary.json" if output_path is None else Path(output_path)
     if MONTHLY_FILE.fullmatch(target.name):
-        raise ReportWriteError("manifest output must not overwrite a monthly report")
+        raise ReportWriteError("summary output must not overwrite a monthly report")
     paths = [
         path
         for path in sorted(directory.iterdir())
@@ -284,7 +284,7 @@ def write_manifest(
             emit("detail", detail=f"Reading and validating {path.name}")
             if path.resolve() == target.resolve():
                 raise ReportWriteError(
-                    "manifest output must not overwrite a source report"
+                    "summary output must not overwrite a source report"
                 )
             try:
                 report = report_from_json(path.read_text(encoding="utf-8"))
@@ -296,42 +296,42 @@ def write_manifest(
                 raise ReportWriteError(f"{path}: invalid report: {exc}") from exc
             yield report
             emit("advance", stage="Reports")
-        emit("detail", detail="Validating assembled manifest")
+        emit("detail", detail="Validating assembled summary")
 
     # report_from_json has already performed full event and summary validation.
-    data = _build_manifest(reports(), check_reports=False, display_name=display_name)
+    data = _build_summary(reports(), check_reports=False, display_name=display_name)
     emit("complete", stage="Reports", detail=f"Summarized {len(paths)} monthly reports")
-    emit("phase", stage="Manifest", detail=f"Saving {target.name}")
-    _publish_manifest(data, target)
+    emit("phase", stage="Summary", detail=f"Saving {target.name}")
+    _publish_summary(data, target)
     emit("finish", stage="Completed", detail=f"Saved {target.name}")
     return target
 
 
-def resolve_manifest_path(path: str | os.PathLike) -> Path:
-    """Locate a manifest from an explicit file or a directory containing it.
+def resolve_summary_path(path: str | os.PathLike) -> Path:
+    """Locate a summary from an explicit file or a directory containing it.
 
     Preserve relative paths and leave existence and content checks to the reader.
     """
     path = Path(path)
-    return path / "manifest.json" if path.is_dir() else path
+    return path / "summary.json" if path.is_dir() else path
 
 
-def _combine_manifests(
+def _combine_summaries(
     paths: Iterable[str | os.PathLike],
     *,
     output_path: str | os.PathLike,
     display_name: str,
     include_partial: bool = False,
 ) -> Path:
-    """Combine disjoint repository manifests offline; inputs must remain stable."""
-    paths = [resolve_manifest_path(path) for path in paths]
+    """Combine disjoint repository summaries offline; inputs must remain stable."""
+    paths = [resolve_summary_path(path) for path in paths]
     if len(paths) < 2:
-        raise ReportWriteError("combining requires at least two input manifests")
+        raise ReportWriteError("combining requires at least two input summaries")
     if not display_name.strip():
         raise ReportWriteError("display name must not be blank")
     target = Path(output_path)
     if MONTHLY_FILE.fullmatch(target.name):
-        raise ReportWriteError("manifest output must not overwrite a monthly report")
+        raise ReportWriteError("summary output must not overwrite a monthly report")
     if target.is_dir():
         raise ReportWriteError(f"{target}: output must be a file path")
 
@@ -341,12 +341,12 @@ def _combine_manifests(
             target.exists() and target.samefile(path)
         ):
             raise ReportWriteError(f"{target}: output must not overwrite input {path}")
-        LOG.debug("Reading and validating manifest %s", path)
+        LOG.debug("Reading and validating summary %s", path)
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-            validate_manifest(data)
+            validate_summary(data)
         except ValueError as exc:
-            raise ReportWriteError(f"{path}: invalid manifest: {exc}") from exc
+            raise ReportWriteError(f"{path}: invalid summary: {exc}") from exc
         inputs.append((path, data))
 
     repositories, repository_inputs, actors, actor_inputs, by_month = {}, {}, {}, {}, {}
@@ -376,21 +376,21 @@ def _combine_manifests(
     months, used = [], set()
     for month, sources in sorted(by_month.items()):
         sources.sort(key=lambda s: s["metadata"]["repository"]["node_id"])
-        ongoing = [s for s in sources if s["metadata"]["ongoing"]]
-        if ongoing and not include_partial:
+        partial_sources = [s for s in sources if s["metadata"]["is_partial"]]
+        if partial_sources and not include_partial:
             LOG.warning(
-                "Excluding partial month %s (ongoing sources: %s); "
+                "Excluding partial month %s (partial sources: %s); "
                 "use --include-partial to retain it",
                 month,
                 ", ".join(
                     f"{s['metadata']['repository']['full_name']} "
                     f"({s['metadata']['repository']['node_id']})"
-                    for s in ongoing
+                    for s in partial_sources
                 ),
             )
             continue
         metadata = {key: sources[0]["metadata"][key] for key in METADATA_KEYS}
-        metadata["ongoing"] = bool(ongoing)
+        metadata["is_partial"] = bool(partial_sources)
         summary = _sum_summaries([s["summaries"] for s in sources], actors)
         used.update(summary["actor_counts"])
         months.append(
@@ -407,37 +407,37 @@ def _combine_manifests(
         "actors": {key: actors[key] for key in sorted(used)},
         "months": months,
     }
-    LOG.debug("Validating combined manifest for %s", target)
-    validate_manifest(result)
-    _publish_manifest(result, target)
+    LOG.debug("Validating combined summary for %s", target)
+    validate_summary(result)
+    _publish_summary(result, target)
     return target
 
 
-def _chop_partial_manifest(
+def _trim_partial_summary(
     path: Path, *, output_path: Path | None = None
 ) -> Path | None:
-    """Validate and save one manifest; return None for a complete in-place input."""
+    """Validate and save one summary; return None for a complete in-place input."""
     if output_path is not None and MONTHLY_FILE.fullmatch(output_path.name):
-        raise ReportWriteError("manifest output must not overwrite a monthly report")
-    path = resolve_manifest_path(path)
+        raise ReportWriteError("summary output must not overwrite a monthly report")
+    path = resolve_summary_path(path)
     source = path.resolve()
     destination = path if output_path is None else output_path
     target = destination.resolve()
     try:
         data = json.loads(source.read_text(encoding="utf-8"))
-        validate_manifest(data)
+        validate_summary(data)
     except ValueError as exc:
-        raise ReportWriteError(f"{path}: invalid manifest: {exc}") from exc
+        raise ReportWriteError(f"{path}: invalid summary: {exc}") from exc
     ordered = sorted(data["months"], key=lambda m: m["metadata"]["month"])
     latest = ordered[-1]
-    if any(month["metadata"]["ongoing"] for month in ordered[:-1]):
+    if any(month["metadata"]["is_partial"] for month in ordered[:-1]):
         raise ReportWriteError(f"{path}: partial month precedes latest month")
-    if not latest["metadata"]["ongoing"]:
+    if not latest["metadata"]["is_partial"]:
         if target == source:
             return None
     else:
         if len(ordered) == 1:
-            raise ReportWriteError(f"{path}: chopping would leave no months")
+            raise ReportWriteError(f"{path}: trimming would leave no months")
         data["months"] = [m for m in data["months"] if m is not latest]
         used = {
             key
@@ -449,15 +449,15 @@ def _chop_partial_manifest(
             key: value for key, value in data["actors"].items() if key in used
         }
         try:
-            validate_manifest(data)
+            validate_summary(data)
         except ReportValidationError as exc:
-            raise ReportWriteError(f"{path}: invalid chopped manifest: {exc}") from exc
-    _publish_manifest(data, target)
+            raise ReportWriteError(f"{path}: invalid trimmed summary: {exc}") from exc
+    _publish_summary(data, target)
     return destination
 
 
-def _publish_manifest(data: dict, target: Path) -> None:
-    """Validate a temporary manifest before atomically replacing its target."""
+def _publish_summary(data: dict, target: Path) -> None:
+    """Validate a temporary summary before atomically replacing its target."""
     text = (
         json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         + "\n"
@@ -470,7 +470,7 @@ def _publish_manifest(data: dict, target: Path) -> None:
             encoding="utf-8",
             newline="\n",
             dir=target.parent,
-            prefix=".manifest.",
+            prefix=".summary.",
             suffix=".tmp",
             delete=False,
         ) as stream:
@@ -478,7 +478,7 @@ def _publish_manifest(data: dict, target: Path) -> None:
             stream.write(text)
             stream.flush()
         emit("detail", detail=f"Verifying {target.name}")
-        validate_manifest(json.loads(temporary.read_text(encoding="utf-8")))
+        validate_summary(json.loads(temporary.read_text(encoding="utf-8")))
         os.replace(temporary, target)
     finally:
         if temporary is not None:

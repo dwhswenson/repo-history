@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { manifestSource as source, combinedSource, fixture } from "../fixtures";
+import { summarySource as source, combinedSource, fixture } from "../fixtures";
 
 test("instances isolate controls, charts, and CSS and survive reconnection", async ({
   page,
@@ -17,8 +17,8 @@ test("instances isolate controls, charts, and CSS and survive reconnection", asy
     document.body.append(button);
     const second = document.createElement("repo-history-viz");
     second.setAttribute(
-      "measures",
-      "github-activities commits contributors total-contributors balance",
+      "metrics",
+      "github-activities commits contributors-by-type total-contributors balance",
     );
     second.id = "second";
     second.style.width = "360px";
@@ -26,19 +26,19 @@ test("instances isolate controls, charts, and CSS and survive reconnection", asy
   });
   const first = page.locator("repo-history-viz").first();
   const second = page.locator("#second");
-  await first.getByLabel("Choose manifest JSON").setInputFiles({
+  await first.getByLabel("Choose summary JSON").setInputFiles({
     name: "2024-02.json",
     mimeType: "application/json",
     buffer: Buffer.from(source().text),
   });
-  await second.getByLabel("Choose manifest JSON").setInputFiles({
+  await second.getByLabel("Choose summary JSON").setInputFiles({
     name: "2024-03.json",
     mimeType: "application/json",
     buffer: Buffer.from(source("2024-03", true).text),
   });
   await first
-    .getByLabel("Measure", { exact: true })
-    .selectOption("contributors");
+    .getByLabel("Metric", { exact: true })
+    .selectOption("contributors-by-type");
   await expect(first.locator("#chart-title")).toHaveText(
     "Monthly contributors by type",
   );
@@ -84,7 +84,7 @@ test("instances isolate controls, charts, and CSS and survive reconnection", asy
   expect(errors).toEqual([]);
 });
 
-test("manifest attributes load automatically, supersede pending loads, and emit events", async ({
+test("summary attributes load automatically, supersede pending loads, and emit events", async ({
   page,
 }) => {
   await page.route("**/reports/slow.json", async (route) => {
@@ -106,8 +106,8 @@ test("manifest attributes load automatically, supersede pending loads, and emit 
       events.push((event as CustomEvent).detail),
     );
     host.setAttribute("hide-loader", "");
-    host.setAttribute("manifest", "/reports/slow.json");
-    host.setAttribute("manifest", "/reports/fast.json");
+    host.setAttribute("summary", "/reports/slow.json");
+    host.setAttribute("summary", "/reports/fast.json");
   });
   await expect(page.locator("#start")).toHaveAttribute(
     "aria-valuetext",
@@ -119,7 +119,7 @@ test("manifest attributes load automatically, supersede pending loads, and emit 
     "aria-valuetext",
     "Mar 2024",
   );
-  await expect(page.getByLabel("Choose manifest JSON")).toBeHidden();
+  await expect(page.getByLabel("Choose summary JSON")).toBeHidden();
   await expect
     .poll(() =>
       page.evaluate(
@@ -142,7 +142,7 @@ test("manifest attributes load automatically, supersede pending loads, and emit 
   await page.evaluate(() =>
     document
       .querySelector("repo-history-viz")!
-      .setAttribute("manifest", "file:///invalid.json"),
+      .setAttribute("summary", "file:///invalid.json"),
   );
   await expect(page.locator("#load-error")).toContainText("HTTP or HTTPS");
   await expect(page.locator("#start")).toHaveAttribute(
@@ -159,11 +159,11 @@ test("built standalone bundle works without source files and duplicate registrat
   await page.route("**/embed.html", (route) =>
     route.fulfill({
       contentType: "text/html",
-      body: `<!doctype html><html><body><p id="host">A host page</p><repo-history-viz measures="github-activities commits contributors total-contributors balance"></repo-history-viz><script type="module" src="/dist/repo-history-viz.js"></script><script type="module" src="/dist/repo-history-viz.js?second"></script></body></html>`,
+      body: `<!doctype html><html><body><p id="host">A host page</p><repo-history-viz metrics="github-activities commits contributors-by-type total-contributors balance"></repo-history-viz><script type="module" src="/dist/repo-history-viz.js"></script><script type="module" src="/dist/repo-history-viz.js?second"></script></body></html>`,
     }),
   );
   await page.goto("/embed.html");
-  await expect(page.getByLabel("Choose manifest JSON")).toBeVisible();
+  await expect(page.getByLabel("Choose summary JSON")).toBeVisible();
   const events = await page.evaluate(async (text) => {
     const host = document.querySelector("repo-history-viz")!;
     const { defineRepoHistoryViz } = await import(
@@ -177,7 +177,7 @@ test("built standalone bundle works without source files and duplicate registrat
         { once: true },
       ),
     );
-    await host.loadManifestSource({ name: "manifest.json", text });
+    await host.loadSummarySource({ name: "summary.json", text });
     return loaded;
   }, source().text);
   expect(events).toEqual({
@@ -197,7 +197,7 @@ test("built standalone bundle works without source files and duplicate registrat
     try {
       await document
         .querySelector("repo-history-viz")!
-        .loadManifestSource({ name: "bad.json", text: "{" });
+        .loadSummarySource({ name: "bad.json", text: "{" });
     } catch (error) {
       return (error as Error).message;
     }
@@ -211,7 +211,7 @@ test("production demo registers the component after bundling", async ({
   page,
 }) => {
   await page.goto("/demo-dist/index.html");
-  await expect(page.getByLabel("Choose manifest JSON")).toBeVisible();
+  await expect(page.getByLabel("Choose summary JSON")).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Activity over time" }),
   ).toHaveCount(0);
@@ -220,45 +220,42 @@ test("production demo registers the component after bundling", async ({
   );
 });
 
-test("measures are required, validated, ordered, and updated without losing reports", async ({
+test("metrics are required, validated, ordered, and updated without losing reports", async ({
   page,
 }) => {
   await page.goto("/");
   const host = page.locator("repo-history-viz");
-  const measure = host.getByLabel("Measure", { exact: true });
+  const metric = host.getByLabel("Metric", { exact: true });
   await host.evaluate((element) => {
-    element.removeAttribute("measures");
+    element.removeAttribute("metrics");
     element.setAttribute("hide-loader", "");
   });
   await expect(host.locator("#configuration-error")).toBeVisible();
   await expect(host.locator("#configuration-error")).toContainText(
-    'Set the "measures" attribute',
+    'Set the "metrics" attribute',
   );
   await host.evaluate(async (element, text) => {
-    await element.loadManifestSource({ name: "manifest.json", text });
+    await element.loadSummarySource({ name: "summary.json", text });
   }, source().text);
   await expect(host.locator("#dashboard")).toBeHidden();
-  await expect(measure.locator("option")).toHaveCount(0);
+  await expect(metric.locator("option")).toHaveCount(0);
   await host.evaluate((element) => {
-    element.setAttribute(
-      "measures",
-      "  commits\n total-contributors commits  ",
-    );
+    element.setAttribute("metrics", "  commits\n total-contributors commits  ");
   });
   await expect(host.locator("#configuration-error")).toBeHidden();
-  await expect(measure.locator("option")).toHaveText([
+  await expect(metric.locator("option")).toHaveText([
     "Commits",
     "Total contributors",
   ]);
-  await expect(measure).toHaveValue("commits");
+  await expect(metric).toHaveValue("commits");
   await expect(host.locator("#chart-title")).toHaveText("Monthly commits");
-  await measure.selectOption("total-contributors");
+  await metric.selectOption("total-contributors");
   await host.evaluate((element) =>
-    element.setAttribute("measures", "balance total-contributors"),
+    element.setAttribute("metrics", "balance total-contributors"),
   );
-  await expect(measure).toHaveValue("total-contributors");
-  await host.evaluate((element) => element.setAttribute("measures", "balance"));
-  await expect(measure).toHaveValue("balance");
+  await expect(metric).toHaveValue("total-contributors");
+  await host.evaluate((element) => element.setAttribute("metrics", "balance"));
+  await expect(metric).toHaveValue("balance");
   await expect(host.locator("#chart-title")).toHaveText(
     "Cumulative issue / PR balance",
   );
@@ -271,27 +268,27 @@ test("measures are required, validated, ordered, and updated without losing repo
       },
       { once: true },
     );
-    element.setAttribute("measures", "commits typo");
+    element.setAttribute("metrics", "commits typo");
     return detail;
   });
   expect(error).toEqual({
     message:
-      "Unknown measures: typo. Supported measures: commits, github-activities, contributors, total-contributors, balance.",
+      "Unknown metrics: typo. Supported metrics: commits, github-activities, contributors-by-type, total-contributors, balance.",
   });
   await expect(host.locator("#configuration-error")).toContainText("typo");
   await expect(host.locator("#dashboard")).toBeHidden();
-  await expect(measure.locator("option")).toHaveCount(0);
-  await host.evaluate((element) => element.setAttribute("measures", "  "));
+  await expect(metric.locator("option")).toHaveCount(0);
+  await host.evaluate((element) => element.setAttribute("metrics", "  "));
   await expect(host.locator("#configuration-error")).toContainText(
-    "at least one measure",
+    "at least one metric",
   );
   await host.evaluate((element) => {
     element.remove();
-    element.setAttribute("measures", "contributors");
+    element.setAttribute("metrics", "contributors-by-type");
     document.body.append(element);
   });
   await expect(host.locator("#dashboard")).toBeVisible();
-  await expect(measure).toHaveValue("contributors");
+  await expect(metric).toHaveValue("contributors-by-type");
   await expect(host.locator("#repository-name")).toHaveText("example/project");
   await expect(host.locator("#start")).toHaveAttribute(
     "aria-valuetext",
@@ -299,20 +296,20 @@ test("measures are required, validated, ordered, and updated without losing repo
   );
 });
 
-test("changing measures preserves the selected month range", async ({
+test("changing metrics preserves the selected month range", async ({
   page,
 }) => {
   await page.goto("/");
   const host = page.locator("repo-history-viz");
   await host.evaluate(
     async (element, sources) => {
-      await element.loadManifestSource(sources);
+      await element.loadSummarySource(sources);
     },
     combinedSource([fixture(), fixture("2024-03")]),
   );
   await host.locator("#start").focus();
   await page.keyboard.press("ArrowRight");
-  await host.evaluate((element) => element.setAttribute("measures", "commits"));
+  await host.evaluate((element) => element.setAttribute("metrics", "commits"));
   await expect(host.locator("#start")).toHaveAttribute(
     "aria-valuetext",
     "Mar 2024",
@@ -320,13 +317,13 @@ test("changing measures preserves the selected month range", async ({
   await expect(host.locator("#chart-title")).toHaveText("Monthly commits");
 });
 
-test("hosted datasets load with one manifest request and no monthly requests", async ({
+test("hosted datasets load with one summary request and no monthly requests", async ({
   page,
 }) => {
   const requested: string[] = [];
   await page.route("**/reports/**", async (route) => {
     requested.push(new URL(route.request().url()).pathname);
-    if (requested.at(-1) === "/reports/manifest.json") {
+    if (requested.at(-1) === "/reports/summary.json") {
       await route.fulfill({
         body: combinedSource([fixture(), fixture("2024-03")]).text,
       });
@@ -336,23 +333,23 @@ test("hosted datasets load with one manifest request and no monthly requests", a
   });
   await page.goto("/");
   await page.locator("repo-history-viz").evaluate(async (element) => {
-    await element.loadManifest("/reports/manifest.json");
+    await element.loadSummary("/reports/summary.json");
   });
   await expect(page.locator("#repository-name")).toHaveText("example/project");
-  expect(requested).toEqual(["/reports/manifest.json"]);
+  expect(requested).toEqual(["/reports/summary.json"]);
 });
 
 test("prepared multi-repository data uses its display name, repository details, and chart exports", async ({
   page,
 }) => {
   const { default: fixture } = await import(
-    "../../../tests/fixtures/multi-repo-manifest-v1.json",
+    "../../../tests/fixtures/multi-repo-summary-v1.json",
     { with: { type: "json" } }
   );
   await page.goto("/");
   await page.evaluate(async (text) => {
     const host = document.querySelector("repo-history-viz")!;
-    await host.loadManifestSource({ name: "multi.json", text });
+    await host.loadSummarySource({ name: "multi.json", text });
   }, JSON.stringify(fixture));
   await expect(page.locator("#repository-name")).toHaveText("Two repositories");
   const details = page.locator("#repository-details");

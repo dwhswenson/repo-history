@@ -165,7 +165,7 @@ def test_nested_pagination_and_distinct_author_credits(session):
 @pytest.mark.parametrize(
     "name,email", [("Name", None), (None, "email@example.org"), (None, None)]
 )
-def test_unresolved_and_missing_authors(session, name, email):
+def test_unlinked_and_missing_authors(session, name, email):
     author = identity(name, email)
     report = collect(
         session,
@@ -176,7 +176,7 @@ def test_unresolved_and_missing_authors(session, name, email):
     assert report.activities[0].metadata.committer.actor_key is None
     assert report.summaries.unattributed_by_type["commit"] == (key is None)
     if key:
-        assert report.actors[0].classification == "unresolved_git"
+        assert report.actors[0].classification == "unlinked_git"
 
 
 def test_null_primary_and_bot_looking_unlinked_identity(session):
@@ -185,7 +185,7 @@ def test_null_primary_and_bot_looking_unlinked_identity(session):
         session, [history([commit(author=None, authors=page([co]), committer=None)])]
     )
     assert report.activities[0].subject.author_key is None
-    assert report.actors[0].classification == "unresolved_git"
+    assert report.actors[0].classification == "unlinked_git"
     assert report.summaries.distinct_actors.bot == 0
 
 

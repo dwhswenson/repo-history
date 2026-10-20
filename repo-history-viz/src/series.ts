@@ -3,7 +3,7 @@ import {
   ACTIVITY_TYPES,
   type ActivityType,
   type Classification,
-  type Manifest,
+  type HistorySummary,
   nextMonth,
 } from "./report.js";
 
@@ -12,7 +12,7 @@ export interface ViewState {
     | "activities"
     | "commits"
     | "github-activities"
-    | "contributors"
+    | "contributors-by-type"
     | "total-contributors"
     | "balance";
   mode: "monthly" | "cumulative";
@@ -38,7 +38,7 @@ export interface PlotData {
   partial: string[];
 }
 
-export function aggregate(manifest: Manifest, state: ViewState): PlotData {
+export function aggregate(summary: HistorySummary, state: ViewState): PlotData {
   if (
     !/^\d{4}-(0[1-9]|1[0-2])$/.test(state.start) ||
     !/^\d{4}-(0[1-9]|1[0-2])$/.test(state.end) ||
@@ -52,7 +52,7 @@ export function aggregate(manifest: Manifest, state: ViewState): PlotData {
     if (month === state.end) break;
   }
   const byMonth = new Map(
-    manifest.months.map((report) => [report.metadata.month, report]),
+    summary.months.map((report) => [report.metadata.month, report]),
   );
   if (state.metric === "balance") {
     if (state.mode !== "cumulative")
@@ -74,7 +74,7 @@ export function aggregate(manifest: Manifest, state: ViewState): PlotData {
         series.forEach((item) => item.values.push(null));
         continue;
       }
-      if (report.metadata.ongoing) partial.push(month);
+      if (report.metadata.is_partial) partial.push(month);
       const counts = report.summaries.repository_counts;
       totals.issues +=
         counts.issue_opened + counts.issue_reopened - counts.issue_closed;
@@ -105,7 +105,7 @@ export function aggregate(manifest: Manifest, state: ViewState): PlotData {
       key === "combined"
         ? totalContributors
           ? "Total contributors"
-          : "Selected types combined"
+          : "Combined total"
         : ACTIVITY_LABELS[key],
     values: [],
   }));
@@ -120,7 +120,7 @@ export function aggregate(manifest: Manifest, state: ViewState): PlotData {
       for (const item of series) item.values.push(null);
       continue;
     }
-    if (report.metadata.ongoing) partial.push(month);
+    if (report.metadata.is_partial) partial.push(month);
     const counts = new Map(keys.map((key) => [key, 0]));
     const actors = new Map(keys.map((key) => [key, new Set<string>()]));
     for (const type of types) {
@@ -132,12 +132,12 @@ export function aggregate(manifest: Manifest, state: ViewState): PlotData {
       const entries = Object.entries(report.summaries.actor_counts).filter(
         ([key, values]) =>
           values[type] > 0 &&
-          state.classifications.includes(manifest.actors[key]!),
+          state.classifications.includes(summary.actors[key]!),
       );
       const count =
         state.metric === "github-activities"
           ? entries.reduce((sum, [, values]) => sum + values[type], 0) +
-            (state.classifications.includes("unresolved_git")
+            (state.classifications.includes("unlinked_git")
               ? report.summaries.unattributed_by_type[type]
               : 0)
           : report.summaries.repository_counts[type];

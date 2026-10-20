@@ -294,8 +294,8 @@ class _CommandProgress(AbstractContextManager):
         return _ConsoleHandler(self.console) if self.interactive else None
 
 
-class BackfillProgress(_CommandProgress):
-    label = "Backfill"
+class CollectProgress(_CommandProgress):
+    label = "Collect"
     stage_names = (
         "Issues",
         "PRs",

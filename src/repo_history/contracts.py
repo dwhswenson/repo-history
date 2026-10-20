@@ -152,9 +152,9 @@ def validate_metadata(metadata, path, runs):
         "coverage must fall within latest collection interval",
     )
     require(
-        metadata["ongoing"] == (observed < end),
+        metadata["is_partial"] == (observed < end),
         path,
-        "ongoing must reflect coverage as_of",
+        "is_partial must reflect coverage as_of",
     )
     require(
         (metadata["default_branch"] is None)

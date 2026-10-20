@@ -26,7 +26,7 @@ def test_counts_and_context(mixed):
     assert (
         s.distinct_actors.human,
         s.distinct_actors.bot,
-        s.distinct_actors.unresolved_git,
+        s.distinct_actors.unlinked_git,
     ) == (2, 1, 2)
     assert s.unattributed_total == 1
     assert s.unattributed_by_type["commit"] == 0

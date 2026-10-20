@@ -23,10 +23,10 @@ await Promise.all([
     join(output, "repo-history-viz.js"),
   ),
 ]);
-execFileSync("pixi", ["run", "-e", "dev", "python", "-m", "repo_history", "summarize", "--input-directory", source, "--output", join(destination, "manifest.json")], {
+execFileSync("pixi", ["run", "-e", "dev", "python", "-m", "repo_history", "summarize", "--input-directory", source, "--output", join(destination, "summary.json")], {
   cwd: fileURLToPath(new URL("../../", import.meta.url)), stdio: "inherit"
 });
-// Keep the published report data limited to the summary manifest.
+// Keep the published report data limited to the history summary.
 for (const name of await readdir(destination)) {
   if (/^\d{4}-(0[1-9]|1[0-2])\.json$/.test(name)) await unlink(join(destination, name));
 }

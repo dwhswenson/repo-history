@@ -1,7 +1,7 @@
 export { RepoHistoryViz, defineRepoHistoryViz } from "./component.js";
 export type {
-  ManifestSource,
-  Manifest,
+  HistorySummarySource,
+  HistorySummary,
   MonthSummary,
   CollectionRun,
   RepositoryMetadata,

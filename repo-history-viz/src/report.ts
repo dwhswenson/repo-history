@@ -1,7 +1,7 @@
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import common from "../../src/repo_history/schemas/common-v1.json" with { type: "json" };
-import schema from "../../src/repo_history/schemas/viz-manifest-v1.json" with { type: "json" };
+import schema from "../../src/repo_history/schemas/viz-summary-v1.json" with { type: "json" };
 
 export const ACTIVITY_LABELS = {
   commit: "Commits",
@@ -11,25 +11,25 @@ export const ACTIVITY_LABELS = {
   pr_opened: "Pull requests opened",
   pr_merged: "Pull requests merged",
   issue_comment: "Issue comments",
-  pr_conversation_comment: "PR conversation comments",
+  pr_discussion_comment: "PR discussion comments",
   pr_review: "PR reviews",
-  pr_inline_review_comment: "Inline review comments",
+  pr_review_comment: "PR review comments",
 } as const;
 export type ActivityType = keyof typeof ACTIVITY_LABELS;
 export const ACTIVITY_TYPES = Object.keys(ACTIVITY_LABELS) as ActivityType[];
-export type Classification = "human" | "bot" | "unresolved_git";
+export type Classification = "human" | "bot" | "unlinked_git";
 
 export type Counts = Record<ActivityType, number>;
 export interface Population {
   total: number;
   human: number;
   bot: number;
-  unresolved_git: number;
+  unlinked_git: number;
 }
 export interface CollectionRun {
   run_id: string;
   command:
-    "backfill" | "update" | "collect_history" | "collect_month" | "manual";
+    "collect" | "update" | "collect_history" | "collect_month" | "manual";
   mode: "rebuild" | "incremental";
   collector_version: string;
   started_at: string;
@@ -53,7 +53,7 @@ export interface CalendarMonth {
   month: string;
   month_start: string;
   month_end: string;
-  ongoing: boolean;
+  is_partial: boolean;
 }
 export interface ReportMetadata extends CalendarMonth {
   repository: RepositoryMetadata;
@@ -78,14 +78,14 @@ export interface MonthSummary {
   summaries: Summaries;
   source_reports: { metadata: ReportMetadata; summaries: Summaries }[];
 }
-export interface Manifest {
+export interface HistorySummary {
   schema_version: "1";
   display_name: string;
   repositories: RepositoryMetadata[];
   actors: Record<string, Classification>;
   months: MonthSummary[];
 }
-export interface ManifestSource {
+export interface HistorySummarySource {
   name: string;
   text: string;
 }
@@ -96,7 +96,7 @@ const ajv = new Ajv2020({
 });
 addFormats(ajv);
 ajv.addSchema(common);
-const validate = ajv.compile<Manifest>(schema);
+const validate = ajv.compile<HistorySummary>(schema);
 export function nextMonth(month: string): string {
   const [year, number] = month.split("-").map(Number);
   return number === 12
@@ -104,7 +104,7 @@ export function nextMonth(month: string): string {
     : `${String(year).padStart(4, "0")}-${String(number! + 1).padStart(2, "0")}`;
 }
 
-export function parseManifest(source: ManifestSource): Manifest {
+export function parseSummary(source: HistorySummarySource): HistorySummary {
   const fail = (message: string): never => {
     throw new Error(`${source.name}: ${message}`);
   };
@@ -120,12 +120,12 @@ export function parseManifest(source: ManifestSource): Manifest {
     ("files" in value || "activities" in value)
   ) {
     return fail(
-      "Load a summary manifest generated with repo-history summarize --input-directory REPORTS.",
+      "Load a history summary generated with repo-history summarize --input-directory REPORTS.",
     );
   }
   if (!validate(value)) {
     return fail(
-      `invalid v1 visualization manifest — ${validate.errors
+      `invalid v1 visualization summary — ${validate.errors
         ?.slice(0, 3)
         .map((e) => `${e.instancePath || "/"} ${e.message}`)
         .join("; ")}`,
@@ -211,8 +211,7 @@ export function parseManifest(source: ManifestSource): Manifest {
     total: keys.length,
     human: keys.filter((k) => value.actors[k] === "human").length,
     bot: keys.filter((k) => value.actors[k] === "bot").length,
-    unresolved_git: keys.filter((k) => value.actors[k] === "unresolved_git")
-      .length,
+    unlinked_git: keys.filter((k) => value.actors[k] === "unlinked_git").length,
   });
   const samePopulation = (actual: Population, expected: Population) =>
     (Object.keys(expected) as (keyof Population)[]).every(
@@ -310,8 +309,8 @@ export function parseManifest(source: ManifestSource): Manifest {
         asOf > Date.parse(p.last_updated_by.finished_at)
       )
         fail("invalid coverage observation time.");
-      if (meta.ongoing !== asOf < Date.parse(meta.month_end))
-        fail("ongoing must reflect coverage as_of.");
+      if (meta.is_partial !== asOf < Date.parse(meta.month_end))
+        fail("is_partial must reflect coverage as_of.");
       if (
         (meta.default_branch === null) !==
         (meta.default_branch_head === null)
@@ -348,8 +347,10 @@ export function parseManifest(source: ManifestSource): Manifest {
         )
           fail(`missing report for ${repo.node_id} in ${m.month}.`);
       }
-    if (m.ongoing !== entry.source_reports.some((s) => s.metadata.ongoing))
-      fail("ongoing disagrees with sources.");
+    if (
+      m.is_partial !== entry.source_reports.some((s) => s.metadata.is_partial)
+    )
+      fail("is_partial disagrees with sources.");
     checkSummary(entry.summaries);
     if (
       !same(entry.summaries.repository_counts, totals) ||
@@ -381,19 +382,20 @@ export function parseManifest(source: ManifestSource): Manifest {
   return value;
 }
 
-export async function loadManifest(
+export async function loadSummary(
   input: string,
   baseUrl: string,
   fetcher: typeof fetch = fetch,
   signal?: AbortSignal,
-): Promise<Manifest> {
+): Promise<HistorySummary> {
   const url = new URL(input, baseUrl);
   if (!["http:", "https:"].includes(url.protocol))
-    throw new Error("Use an HTTP or HTTPS manifest URL.");
+    throw new Error("Use an HTTP or HTTPS summary URL.");
   const response = await fetcher(url.href, {
     credentials: "omit",
     ...(signal ? { signal } : {}),
   });
-  if (!response.ok) throw new Error(`Manifest: HTTP ${response.status}.`);
-  return parseManifest({ name: "Manifest", text: await response.text() });
+  if (!response.ok)
+    throw new Error(`History summary: HTTP ${response.status}.`);
+  return parseSummary({ name: "History summary", text: await response.text() });
 }

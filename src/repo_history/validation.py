@@ -99,14 +99,14 @@ def _validate_semantics(report: MonthlyReport, *, check_summaries: bool) -> None
         p = f"$.actors[{i}]"
         _require(actor.key not in registry, p + ".key", "duplicate actor key")
         registry[actor.key] = actor
-        if actor.classification == "unresolved_git":
+        if actor.classification == "unlinked_git":
             _require(
                 actor.github_node_id is None
                 and actor.database_id is None
                 and actor.login is None
                 and actor.url is None,
                 p,
-                "unresolved Git actor cannot carry linked account metadata",
+                "unlinked Git actor cannot carry linked account metadata",
             )
             _require(
                 actor.key == git_identity_key(actor.git_email, actor.git_name),
@@ -224,7 +224,7 @@ def _validate_semantics(report: MonthlyReport, *, check_summaries: bool) -> None
                 p + ".metadata.submitted_at",
                 "must match occurrence timestamp",
             )
-        if kind == "pr_inline_review_comment":
+        if kind == "pr_review_comment":
             _require(
                 details.publication_confirmed,
                 p + ".metadata.publication_confirmed",

@@ -1,12 +1,12 @@
 import { createViewer } from "./viewer.js";
-import type { ManifestSource } from "./report.js";
+import type { HistorySummarySource } from "./report.js";
 
 // Importing the package during static rendering must not require a browser DOM.
 const ElementBase = globalThis.HTMLElement ?? (class {} as typeof HTMLElement);
 
 /** Interactive monthly repository history, isolated in an open shadow root. */
 export class RepoHistoryViz extends ElementBase {
-  static observedAttributes = ["manifest", "measures"];
+  static observedAttributes = ["summary", "metrics"];
   private viewer?: ReturnType<typeof createViewer>;
 
   connectedCallback(): void {
@@ -18,9 +18,9 @@ export class RepoHistoryViz extends ElementBase {
         );
       });
     }
-    this.viewer.setMeasures(this.getAttribute("measures"));
-    const manifest = this.getAttribute("manifest");
-    if (manifest?.trim()) void this.viewer.loadUrl(manifest).catch(() => {});
+    this.viewer.setMetrics(this.getAttribute("metrics"));
+    const summary = this.getAttribute("summary");
+    if (summary?.trim()) void this.viewer.loadUrl(summary).catch(() => {});
   }
 
   disconnectedCallback(): void {
@@ -33,28 +33,28 @@ export class RepoHistoryViz extends ElementBase {
     value: string | null,
   ): void {
     if (previous === value || !this.isConnected || !this.viewer) return;
-    if (name === "measures") {
-      this.viewer.setMeasures(value);
+    if (name === "metrics") {
+      this.viewer.setMetrics(value);
       return;
     }
     if (value?.trim()) void this.viewer.loadUrl(value).catch(() => {});
     else this.viewer.cancel();
   }
 
-  /** Load a hosted manifest. Rejects on failure; the previous dataset is retained. */
-  loadManifest(url: string): Promise<void> {
+  /** Load a hosted summary. Rejects on failure; the previous dataset is retained. */
+  loadSummary(url: string): Promise<void> {
     if (!this.isConnected || !this.viewer)
       return Promise.reject(
-        new Error("Connect the viewer before loading a manifest."),
+        new Error("Connect the viewer before loading a summary."),
       );
     return this.viewer.loadUrl(url);
   }
 
-  /** Load manifest JSON without a network request. */
-  loadManifestSource(source: ManifestSource): Promise<void> {
+  /** Load summary JSON without a network request. */
+  loadSummarySource(source: HistorySummarySource): Promise<void> {
     if (!this.isConnected || !this.viewer)
       return Promise.reject(
-        new Error("Connect the viewer before loading a manifest."),
+        new Error("Connect the viewer before loading a summary."),
       );
     return this.viewer.loadSource(source);
   }

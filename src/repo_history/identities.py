@@ -16,8 +16,8 @@ def git_identity_key(email: str | None, name: str | None) -> str | None:
     return f"git:{kind}:{sha256(value.encode('utf-8')).hexdigest()}"
 
 
-def unresolved_git_actor(email: str | None, name: str | None) -> Actor | None:
+def unlinked_git_actor(email: str | None, name: str | None) -> Actor | None:
     key = git_identity_key(email, name)
     if key is None:
         return None
-    return Actor(key, "unresolved_git", git_name=name, git_email=email)
+    return Actor(key, "unlinked_git", git_name=name, git_email=email)

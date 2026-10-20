@@ -34,9 +34,9 @@ export const COLORS = [
   "#491d8b", // PRs opened: Purple 80
   "#8a3800", // PRs merged: Orange 70
   "#198038", // Issue comments: Green 60
-  "#b28600", // PR conversation comments: Yellow 50
+  "#b28600", // PR discussion comments: Yellow 50
   "#a56eff", // PR reviews: Purple 50
-  "#1192e8", // PR inline review comments: Cyan 50
+  "#1192e8", // PR review comments: Cyan 50
 ];
 
 export function renderChart(
@@ -68,7 +68,7 @@ export function renderChart(
           stack: stacked
             ? item.key === "combined"
               ? "total"
-              : "contribution-types"
+              : "activity-types"
             : undefined,
           label: item.label,
           data: item.values,

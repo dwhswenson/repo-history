@@ -30,7 +30,7 @@ def derive_summaries(
             len(keys),
             classes.count("human"),
             classes.count("bot"),
-            classes.count("unresolved_git"),
+            classes.count("unlinked_git"),
         )
 
     return MonthlySummaries(

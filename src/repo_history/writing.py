@@ -33,7 +33,7 @@ def _check_directory(directory: Path, repository_id: str | None = None) -> str |
 
 
 def directory_repository(directory):
-    """Read existing repository boundary evidence without relying on a manifest."""
+    """Read existing repository boundary evidence without relying on a summary."""
     from .contracts import choose_repository
 
     if not directory.exists():
@@ -61,7 +61,7 @@ def write_report(report: MonthlyReport, output_directory: str | os.PathLike) -> 
 def _write_report(
     report, output_directory, *, check_directory=False, previous_repository=None
 ):
-    """Atomic writer for a destination already checked by a sequential backfill."""
+    """Atomic writer for a destination already checked by a sequential collection run."""
     report_to_json(report)  # Validate before touching the destination.
     directory = Path(output_directory)
     if check_directory:

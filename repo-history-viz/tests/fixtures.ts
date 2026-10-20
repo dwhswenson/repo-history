@@ -3,8 +3,8 @@ import empty from "../../tests/fixtures/empty-2024-02.json" with { type: "json" 
 import {
   nextMonth,
   ACTIVITY_TYPES,
-  parseManifest,
-  type Manifest,
+  parseSummary,
+  type HistorySummary,
   type Counts,
   type Population,
   type ReportMetadata,
@@ -36,8 +36,8 @@ export function source(month = "2024-02", isEmpty = false) {
 }
 
 export type FullReport = ReturnType<typeof fixture>;
-export function toManifest(reports: FullReport[]): Manifest {
-  const actors: Manifest["actors"] = Object.create(null);
+export function toSummary(reports: FullReport[]): HistorySummary {
+  const actors: HistorySummary["actors"] = Object.create(null);
   const months = reports.map((report) => {
     const perActor: Record<string, Counts> = Object.create(null);
     const counts = Object.fromEntries(
@@ -70,11 +70,11 @@ export function toManifest(reports: FullReport[]): Manifest {
       total: keys.length,
       human: keys.filter((k) => actors[k] === "human").length,
       bot: keys.filter((k) => actors[k] === "bot").length,
-      unresolved_git: keys.filter((k) => actors[k] === "unresolved_git").length,
+      unlinked_git: keys.filter((k) => actors[k] === "unlinked_git").length,
     });
     const metadata = structuredClone(report.metadata) as ReportMetadata;
-    // Tests may mark snapshots ongoing after creating their activity fixtures.
-    if (metadata.ongoing) {
+    // Tests may mark snapshots partial after creating their activity fixtures.
+    if (metadata.is_partial) {
       metadata.coverage.as_of = `${metadata.month}-15T12:00:00Z`;
       for (const run of Object.values(metadata.provenance)) {
         run.started_at = metadata.coverage.as_of;
@@ -104,7 +104,7 @@ export function toManifest(reports: FullReport[]): Manifest {
         month: metadata.month,
         month_start: metadata.month_start,
         month_end: metadata.month_end,
-        ongoing: metadata.ongoing,
+        is_partial: metadata.is_partial,
       },
       summaries,
       source_reports: [{ metadata, summaries: structuredClone(summaries) }],
@@ -117,7 +117,7 @@ export function toManifest(reports: FullReport[]): Manifest {
     schema_version: "1",
     display_name: latest.metadata.repository.full_name,
     repositories: [
-      latest.metadata.repository as Manifest["repositories"][number],
+      latest.metadata.repository as HistorySummary["repositories"][number],
     ],
     actors,
     months,
@@ -125,18 +125,18 @@ export function toManifest(reports: FullReport[]): Manifest {
 }
 export function fromReports(
   sources: { name: string; text: string }[],
-): Manifest {
-  return parseManifest({
-    name: "manifest.json",
-    text: JSON.stringify(toManifest(sources.map((s) => JSON.parse(s.text)))),
+): HistorySummary {
+  return parseSummary({
+    name: "summary.json",
+    text: JSON.stringify(toSummary(sources.map((s) => JSON.parse(s.text)))),
   });
 }
-export function manifestSource(month = "2024-02", isEmpty = false) {
+export function summarySource(month = "2024-02", isEmpty = false) {
   return {
-    name: "manifest.json",
-    text: JSON.stringify(toManifest([fixture(month, isEmpty)])),
+    name: "summary.json",
+    text: JSON.stringify(toSummary([fixture(month, isEmpty)])),
   };
 }
 export function combinedSource(reports: FullReport[]) {
-  return { name: "manifest.json", text: JSON.stringify(toManifest(reports)) };
+  return { name: "summary.json", text: JSON.stringify(toSummary(reports)) };
 }

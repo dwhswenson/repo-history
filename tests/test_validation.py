@@ -63,7 +63,7 @@ def test_inline_fallback_rejected(field, value, mixed):
     activity = next(
         a
         for a in mixed.activities
-        if a.type == "pr_inline_review_comment" and a.metadata.timestamp_fallback
+        if a.type == "pr_review_comment" and a.metadata.timestamp_fallback
     )
     with pytest.raises(ReportValidationError):
         build_report(
@@ -94,18 +94,21 @@ def test_calendar_boundaries(label, start, end, empty):
     )
     report = build_report(metadata, [], [])
     assert report.metadata.month_end == end
-    ongoing = replace(
-        metadata, collection_started_at=start, collection_finished_at=end, ongoing=True
+    is_partial = replace(
+        metadata,
+        collection_started_at=start,
+        collection_finished_at=end,
+        is_partial=True,
     )
-    assert build_report(ongoing, [], []).metadata.ongoing
+    assert build_report(is_partial, [], []).metadata.is_partial
     with pytest.raises(ReportValidationError, match="future month"):
         build_report(
             replace(metadata, collection_started_at=start - timedelta(seconds=1)),
             [],
             [],
         )
-    with pytest.raises(ReportValidationError, match="ongoing"):
-        build_report(replace(metadata, ongoing=True), [], [])
+    with pytest.raises(ReportValidationError, match="is_partial"):
+        build_report(replace(metadata, is_partial=True), [], [])
 
 
 def test_half_open_interval(mixed):
@@ -143,7 +146,7 @@ def test_half_open_interval(mixed):
         (("metadata", "month_start"), "2024-02-02T00:00:00Z"),
         (("metadata", "month_end"), "2024-02-29T00:00:00Z"),
         (("metadata", "month"), "0000-02"),
-        (("metadata", "ongoing"), True),
+        (("metadata", "is_partial"), True),
         (
             ("metadata", "provenance", "last_updated_by", "finished_at"),
             "2024-03-01T00:00:00Z",
@@ -213,8 +216,8 @@ def test_wrong_dataclass_rejected(mixed):
         )
 
 
-def test_unresolved_identity_mismatch(mixed):
-    git_actor = next(a for a in mixed.actors if a.classification == "unresolved_git")
+def test_unlinked_identity_mismatch(mixed):
+    git_actor = next(a for a in mixed.actors if a.classification == "unlinked_git")
     actors = [
         replace(a, git_email="different@example.org") if a == git_actor else a
         for a in mixed.actors
@@ -227,7 +230,7 @@ def test_unresolved_identity_mismatch(mixed):
             [
                 Actor(
                     git_actor.key,
-                    "unresolved_git",
+                    "unlinked_git",
                     login="inferred",
                     git_email=git_actor.git_email,
                     git_name=git_actor.git_name,
@@ -276,7 +279,7 @@ def test_inline_publication_before_creation_is_valid(mixed):
     activity = next(
         a
         for a in mixed.activities
-        if a.type == "pr_inline_review_comment" and not a.metadata.timestamp_fallback
+        if a.type == "pr_review_comment" and not a.metadata.timestamp_fallback
     )
     activity = replace(
         activity,

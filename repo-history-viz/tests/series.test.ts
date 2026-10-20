@@ -1,20 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { eventAggregate } from "./event-reference";
 import { aggregate, type ViewState } from "../src/series";
-import { ACTIVITY_TYPES, parseManifest } from "../src/report";
-import combined from "../../tests/fixtures/combined-manifest-v1.json" with { type: "json" };
+import { ACTIVITY_TYPES, parseSummary } from "../src/report";
+import combined from "../../tests/fixtures/combined-summary-v1.json" with { type: "json" };
 import {
   fixture,
   source,
   fromReports as loadReports,
-  toManifest,
+  toSummary,
 } from "./fixtures";
 
 const defaults: ViewState = {
   metric: "activities",
   mode: "monthly",
   types: ["commit"],
-  classifications: ["human", "unresolved_git"],
+  classifications: ["human", "unlinked_git"],
   combined: false,
   start: "2024-02",
   end: "2024-03",
@@ -24,12 +24,12 @@ const plot = (overrides: Partial<ViewState> = {}) =>
   aggregate(reports, { ...defaults, ...overrides });
 
 describe("CLI-combined contributor identities across repositories and months", () => {
-  const manifest = parseManifest({
+  const summary = parseSummary({
     name: "combined.json",
     text: JSON.stringify(combined),
   });
   const values = (overrides: Partial<ViewState> = {}) =>
-    aggregate(manifest, {
+    aggregate(summary, {
       ...defaults,
       metric: "total-contributors",
       end: "2024-04",
@@ -43,23 +43,21 @@ describe("CLI-combined contributor identities across repositories and months", (
     expect(
       values({
         mode: "cumulative",
-        classifications: ["human", "bot", "unresolved_git"],
+        classifications: ["human", "bot", "unlinked_git"],
       }),
     ).toEqual([[4, 5, 5]]);
   });
 
-  it("filters identities and contribution types without summing populations", () => {
+  it("filters identities and activity types without summing populations", () => {
     expect(values({ classifications: ["human"] })).toEqual([[2, 3, 2]]);
     expect(values({ classifications: ["bot"] })).toEqual([[1, 1, 0]]);
-    expect(values({ classifications: ["unresolved_git"] })).toEqual([
-      [1, 0, 0],
-    ]);
+    expect(values({ classifications: ["unlinked_git"] })).toEqual([[1, 0, 0]]);
     expect(values({ classifications: [], mode: "cumulative" })).toEqual([
       [0, 0, 0],
     ]);
     expect(
       values({
-        metric: "contributors",
+        metric: "contributors-by-type",
         types: ["commit", "issue_comment"],
         combined: true,
       }),
@@ -70,7 +68,7 @@ describe("CLI-combined contributor identities across repositories and months", (
     ]);
     expect(
       values({
-        metric: "contributors",
+        metric: "contributors-by-type",
         types: ["commit", "issue_comment"],
         combined: true,
         mode: "cumulative",
@@ -104,7 +102,7 @@ describe("CLI-combined contributor identities across repositories and months", (
         metric: "github-activities",
         types: ["issue_opened", "pr_review", "issue_comment"],
         combined: true,
-        classifications: ["human", "bot", "unresolved_git"],
+        classifications: ["human", "bot", "unlinked_git"],
       }),
     ).toEqual([
       [1, 1, 0],
@@ -137,12 +135,12 @@ describe("monthly and cumulative aggregation", () => {
       [1, 1],
     ]);
   });
-  it("filters GitHub events by credited actor, including missing actors as undetermined", () => {
+  it("filters GitHub events by credited actor, including missing actors as unknown actors", () => {
     const selection: Partial<ViewState> = {
       metric: "github-activities",
       types: [
-        "pr_inline_review_comment",
-        "pr_conversation_comment",
+        "pr_review_comment",
+        "pr_discussion_comment",
         "issue_comment",
         "pr_merged",
       ],
@@ -189,7 +187,7 @@ describe("monthly and cumulative aggregation", () => {
     expect(
       plot({
         ...selection,
-        classifications: ["human", "bot", "unresolved_git"],
+        classifications: ["human", "bot", "unlinked_git"],
       }).series.at(-1)!.values,
     ).toEqual([5, 5]);
   });
@@ -218,7 +216,7 @@ describe("monthly and cumulative aggregation", () => {
       (activity) =>
         activity.type === "issue_closed" || activity.type === "pr_merged",
     );
-    closing.metadata.ongoing = true;
+    closing.metadata.is_partial = true;
     const result = aggregate(
       loadReports([
         source(),
@@ -302,9 +300,12 @@ describe("monthly and cumulative aggregation", () => {
     expect(result.missing).toEqual(["2024-03"]);
   });
   it("counts unique contributors each month and unions across months", () => {
-    expect(plot({ metric: "contributors" }).series[0]!.values).toEqual([3, 3]);
+    expect(plot({ metric: "contributors-by-type" }).series[0]!.values).toEqual([
+      3, 3,
+    ]);
     expect(
-      plot({ metric: "contributors", mode: "cumulative" }).series[0]!.values,
+      plot({ metric: "contributors-by-type", mode: "cumulative" }).series[0]!
+        .values,
     ).toEqual([3, 3]);
   });
   it("includes newly observed contributors cumulatively", () => {
@@ -320,19 +321,22 @@ describe("monthly and cumulative aggregation", () => {
         source(),
         { name: "later.json", text: JSON.stringify(later) },
       ]),
-      { ...defaults, metric: "contributors", mode: "cumulative" },
+      { ...defaults, metric: "contributors-by-type", mode: "cumulative" },
     );
     expect(result.series[0]!.values).toEqual([3, 4]);
   });
   it("resets cumulative contributor membership at the selected start", () => {
     expect(
-      plot({ metric: "contributors", mode: "cumulative", start: "2024-03" })
-        .series[0]!.values,
+      plot({
+        metric: "contributors-by-type",
+        mode: "cumulative",
+        start: "2024-03",
+      }).series[0]!.values,
     ).toEqual([3]);
   });
   it("deduplicates a combined contributor series across activity types", () => {
     const result = plot({
-      metric: "contributors",
+      metric: "contributors-by-type",
       types: ["commit", "pr_opened"],
       combined: true,
     });
@@ -344,14 +348,14 @@ describe("monthly and cumulative aggregation", () => {
   });
   it("excludes context-only authors and null credits", () => {
     const result = plot({
-      metric: "contributors",
+      metric: "contributors-by-type",
       types: ACTIVITY_TYPES,
       combined: true,
     });
     expect(result.series.at(-1)!.values).toEqual([4, 4]);
     expect(
-      plot({ metric: "contributors", types: ["issue_comment"] }).series[0]!
-        .values,
+      plot({ metric: "contributors-by-type", types: ["issue_comment"] })
+        .series[0]!.values,
     ).toEqual([0, 0]);
     expect(plot({ types: ["issue_comment"] }).series[0]!.values).toEqual([
       1, 1,
@@ -359,12 +363,12 @@ describe("monthly and cumulative aggregation", () => {
   });
   it("applies contributor classification filters without changing event counts", () => {
     expect(
-      plot({ metric: "contributors", classifications: ["human"] }).series[0]!
-        .values,
+      plot({ metric: "contributors-by-type", classifications: ["human"] })
+        .series[0]!.values,
     ).toEqual([1, 1]);
     expect(
       plot({
-        metric: "contributors",
+        metric: "contributors-by-type",
         types: ACTIVITY_TYPES,
         classifications: ["bot"],
         combined: true,
@@ -372,12 +376,13 @@ describe("monthly and cumulative aggregation", () => {
     ).toEqual([1, 1]);
     expect(plot({ classifications: [] }).series[0]!.values).toEqual([2, 2]);
     expect(
-      plot({ metric: "contributors", classifications: [] }).series[0]!.values,
+      plot({ metric: "contributors-by-type", classifications: [] }).series[0]!
+        .values,
     ).toEqual([0, 0]);
   });
   it("identifies partial reports and supports no selected types", () => {
     const report = fixture();
-    report.metadata.ongoing = true;
+    report.metadata.is_partial = true;
     const result = aggregate(
       loadReports([{ name: "partial.json", text: JSON.stringify(report) }]),
       { ...defaults, end: "2024-02", types: [], combined: true },
@@ -417,18 +422,18 @@ describe("monthly and cumulative aggregation", () => {
   });
 });
 
-it("matches the event reference for every measure, identity filter, mode and selected ranges", () => {
+it("matches the event reference for every metric, identity filter, mode and selected ranges", () => {
   const first = fixture();
   const empty = fixture("2024-04", true);
   const last = fixture("2024-05");
-  last.metadata.ongoing = true;
+  last.metadata.is_partial = true;
   last.actors.find((a) => a.key === "U_author")!.key = "U_new";
   for (const activity of last.activities)
     for (const credit of activity.credits) {
       if (credit.actor_key === "U_author") credit.actor_key = "U_new";
     }
   const full = [first, empty, last];
-  const manifest = toManifest(full);
+  const summary = toSummary(full);
   const selections = [
     [],
     ...ACTIVITY_TYPES.map((t) => [t]),
@@ -439,7 +444,7 @@ it("matches the event reference for every measure, identity filter, mode and sel
     "activities",
     "commits",
     "github-activities",
-    "contributors",
+    "contributors-by-type",
     "total-contributors",
     "balance",
   ] as const) {
@@ -447,7 +452,7 @@ it("matches the event reference for every measure, identity filter, mode and sel
       if (metric === "balance" && mode === "monthly") continue;
       for (let mask = 0; mask < 8; mask++) {
         const classifications = (
-          ["human", "bot", "unresolved_git"] as const
+          ["human", "bot", "unlinked_git"] as const
         ).filter((_, i) => mask & (1 << i));
         for (const types of selections)
           for (const combined of [false, true]) {
@@ -466,7 +471,7 @@ it("matches the event reference for every measure, identity filter, mode and sel
                 start: start!,
                 end: end!,
               };
-              expect(aggregate(manifest, state)).toEqual(
+              expect(aggregate(summary, state)).toEqual(
                 eventAggregate(full, state),
               );
             }
@@ -478,16 +483,16 @@ it("matches the event reference for every measure, identity filter, mode and sel
 
 it("renders prepared cross-repository counts using the existing chart calculations", async () => {
   const { default: fixture } = await import(
-    "../../tests/fixtures/multi-repo-manifest-v1.json",
+    "../../tests/fixtures/multi-repo-summary-v1.json",
     { with: { type: "json" } }
   );
-  const { parseManifest } = await import("../src/report");
-  const manifest = parseManifest({
+  const { parseSummary } = await import("../src/report");
+  const summary = parseSummary({
     name: "multi.json",
     text: JSON.stringify(fixture),
   });
   expect(
-    aggregate(manifest, {
+    aggregate(summary, {
       ...defaults,
       start: "2024-02",
       end: "2024-02",
@@ -495,12 +500,12 @@ it("renders prepared cross-repository counts using the existing chart calculatio
     }).series[0]!.values,
   ).toEqual([4]);
   expect(
-    aggregate(manifest, {
+    aggregate(summary, {
       ...defaults,
       start: "2024-02",
       end: "2024-02",
       metric: "total-contributors",
-      classifications: ["human", "bot", "unresolved_git"],
+      classifications: ["human", "bot", "unlinked_git"],
     }).series[0]!.values,
   ).toEqual([5]);
 });

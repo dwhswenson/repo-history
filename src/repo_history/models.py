@@ -12,12 +12,12 @@ ActivityType = Literal[
     "issue_closed",
     "issue_reopened",
     "issue_comment",
-    "pr_conversation_comment",
-    "pr_inline_review_comment",
+    "pr_discussion_comment",
+    "pr_review_comment",
     "pr_review",
 ]
 ACTIVITY_TYPES = tuple(ActivityType.__args__)
-ActorClass = Literal["human", "bot", "unresolved_git"]
+ActorClass = Literal["human", "bot", "unlinked_git"]
 
 
 @dataclass(frozen=True)
@@ -87,7 +87,7 @@ class ReportMetadata:
     month_end: datetime
     provenance: Provenance
     coverage: Coverage
-    ongoing: bool
+    is_partial: bool
     default_branch: str | None
     default_branch_head: str | None
 
@@ -149,12 +149,16 @@ class IssueCommentMetadata:
 
 
 @dataclass(frozen=True)
-class PRConversationCommentMetadata:
+class PRDiscussionCommentMetadata:
+    """A comment in a pull request's general discussion."""
+
     source_node_id: str
 
 
 @dataclass(frozen=True)
-class PRInlineReviewCommentMetadata:
+class PRReviewCommentMetadata:
+    """A published inline comment or reply in a pull request review thread."""
+
     source_node_id: str
     review_node_id: str | None
     thread_node_id: str | None
@@ -184,8 +188,8 @@ METADATA_CLASSES = dict(
             IssueClosedMetadata,
             IssueReopenedMetadata,
             IssueCommentMetadata,
-            PRConversationCommentMetadata,
-            PRInlineReviewCommentMetadata,
+            PRDiscussionCommentMetadata,
+            PRReviewCommentMetadata,
             PRReviewMetadata,
         ),
         strict=True,
@@ -199,8 +203,8 @@ ActivityMetadata = (
     | IssueClosedMetadata
     | IssueReopenedMetadata
     | IssueCommentMetadata
-    | PRConversationCommentMetadata
-    | PRInlineReviewCommentMetadata
+    | PRDiscussionCommentMetadata
+    | PRReviewCommentMetadata
     | PRReviewMetadata
 )
 
@@ -221,7 +225,7 @@ class PopulationCounts:
     total: int
     human: int
     bot: int
-    unresolved_git: int
+    unlinked_git: int
 
 
 @dataclass(frozen=True)

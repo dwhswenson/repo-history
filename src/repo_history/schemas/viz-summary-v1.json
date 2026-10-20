@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:repo-history-tracking:viz-manifest:1",
+  "$id": "urn:repo-history-tracking:viz-summary:1",
   "type": "object",
   "properties": {
     "schema_version": {
@@ -27,7 +27,7 @@
         "enum": [
           "human",
           "bot",
-          "unresolved_git"
+          "unlinked_git"
         ]
       }
     },

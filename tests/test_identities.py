@@ -8,7 +8,7 @@ import pytest
 from repo_history import (
     build_report,
     git_identity_key,
-    unresolved_git_actor,
+    unlinked_git_actor,
 )
 
 from .helpers import replace
@@ -27,20 +27,20 @@ FIXTURES = Path(__file__).parent / "fixtures"
 def test_identity_hash(email, name, kind, value):
     key = f"git:{kind}:{sha256(value.encode()).hexdigest()}"
     assert git_identity_key(email, name) == key
-    actor = unresolved_git_actor(email, name)
+    actor = unlinked_git_actor(email, name)
     assert actor.key == key
     assert actor.git_email == email
     assert actor.git_name == name
-    assert actor.classification == "unresolved_git"
+    assert actor.classification == "unlinked_git"
 
 
 def test_identity_namespaces_and_missing():
     assert git_identity_key("Same", None) != git_identity_key(None, "Same")
     assert git_identity_key(None, "Name") != git_identity_key(None, "name")
     assert git_identity_key("EMAIL", None) == git_identity_key("email", None)
-    assert unresolved_git_actor(" ", None) is None
+    assert unlinked_git_actor(" ", None) is None
     assert git_identity_key(None, " ") is None
-    assert unresolved_git_actor(None, "tool[bot]").classification == "unresolved_git"
+    assert unlinked_git_actor(None, "tool[bot]").classification == "unlinked_git"
 
 
 def test_linked_identity_survives_login_change(mixed):

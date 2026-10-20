@@ -10,7 +10,7 @@ from pathlib import Path
 from time import perf_counter
 
 from ._progress import emit
-from ._timing import backfill_timing, timed_phase
+from ._timing import collect_timing, timed_phase
 from .collection import _month_bounds
 from .history import _collect_history, history_to_months
 from .writing import _check_directory, _write_report
@@ -54,7 +54,7 @@ def _validate_optional_range(start: str | None, end: str | None, now: datetime) 
     return end
 
 
-def _run_backfill(
+def _run_collect(
     owner: str,
     repo: str,
     start: str | None = None,
@@ -64,10 +64,10 @@ def _run_backfill(
     token: str | None = None,
     on_written: Callable[[Path], None] | None = None,
     now: datetime | None = None,
-    command: str = "backfill",
+    command: str = "collect",
 ) -> list[Path]:
-    with backfill_timing(LOG):
-        with timed_phase(LOG, "Backfill preparation"):
+    with collect_timing(LOG):
+        with timed_phase(LOG, "Collect preparation"):
             _validate_request(owner, repo)
             now = _utc_now() if now is None else now
             requested_end = end
@@ -162,7 +162,7 @@ def _run_backfill(
         return paths
 
 
-def backfill(
+def collect(
     owner: str,
     repo: str,
     start: str | None = None,
@@ -182,7 +182,7 @@ def backfill(
     belong to the same repository. Current UTC month is allowed; future months
     are rejected before any network request.
     """
-    return _run_backfill(
+    return _run_collect(
         owner,
         repo,
         start,

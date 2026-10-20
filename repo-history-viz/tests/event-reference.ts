@@ -11,7 +11,7 @@ export interface ViewState {
     | "activities"
     | "commits"
     | "github-activities"
-    | "contributors"
+    | "contributors-by-type"
     | "total-contributors"
     | "balance";
   mode: "monthly" | "cumulative";
@@ -76,7 +76,7 @@ export function eventAggregate(
         series.forEach((item) => item.values.push(null));
         continue;
       }
-      if (report.metadata.ongoing) partial.push(month);
+      if (report.metadata.is_partial) partial.push(month);
       for (const activity of report.activities) {
         if (
           activity.type === "issue_opened" ||
@@ -113,7 +113,7 @@ export function eventAggregate(
       key === "combined"
         ? totalContributors
           ? "Total contributors"
-          : "Selected types combined"
+          : "Combined total"
         : ACTIVITY_LABELS[key],
     values: [],
   }));
@@ -128,7 +128,7 @@ export function eventAggregate(
       for (const item of series) item.values.push(null);
       continue;
     }
-    if (report.metadata.ongoing) partial.push(month);
+    if (report.metadata.is_partial) partial.push(month);
     const classes = new Map(
       report.actors.map((actor) => [actor.key, actor.classification]),
     );
@@ -137,16 +137,16 @@ export function eventAggregate(
     for (const activity of report.activities) {
       if (!types.includes(activity.type)) continue;
       if (state.metric === "github-activities") {
-        // Missing performers belong to Undetermined; count each event once.
+        // Missing performers belong to Unknown actors; count each event once.
         const matches = activity.credits.length
           ? activity.credits.some((credit) =>
               state.classifications.includes(
                 credit.actor_key === null
-                  ? "unresolved_git"
-                  : (classes.get(credit.actor_key) ?? "unresolved_git"),
+                  ? "unlinked_git"
+                  : (classes.get(credit.actor_key) ?? "unlinked_git"),
               ),
             )
-          : state.classifications.includes("unresolved_git");
+          : state.classifications.includes("unlinked_git");
         if (!matches) continue;
       }
       const targets: (ActivityType | "combined")[] = totalContributors

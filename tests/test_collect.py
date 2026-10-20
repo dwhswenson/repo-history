@@ -1,4 +1,4 @@
-"""Full-history backfill defaults, validation, and replacement."""
+"""Full-history collection defaults, validation, and replacement."""
 
 import importlib
 import io
@@ -8,16 +8,16 @@ import pytest
 
 from repo_history import (
     RepositoryHistory,
-    backfill,
+    collect,
     report_from_json,
     report_to_json,
     state,
 )
-from repo_history._terminal import BackfillProgress
+from repo_history._terminal import CollectProgress
 
 from .helpers import replace
 
-module = importlib.import_module("repo_history.backfill")
+module = importlib.import_module("repo_history.collect")
 NOW = datetime(2025, 1, 1, tzinfo=timezone.utc)
 
 
@@ -48,7 +48,7 @@ def collector(monkeypatch):
 
 
 def test_inclusive_range_and_replacement(tmp_path, collector):
-    paths = backfill(
+    paths = collect(
         "o", "r", "2023-12", "2024-03", output_directory=tmp_path, token="secret"
     )
     assert [p.stem for p in paths] == ["2023-12", "2024-01", "2024-02", "2024-03"]
@@ -59,7 +59,7 @@ def test_inclusive_range_and_replacement(tmp_path, collector):
         "started": NOW,
     }
     before = {p: p.read_bytes() for p in paths}
-    backfill("o", "r", "2024-02", "2024-02", output_directory=tmp_path)
+    collect("o", "r", "2024-02", "2024-02", output_directory=tmp_path)
     assert len(collector) == 2
     assert collector[-1][2]["expected_repository_id"] == "R_example"
     assert all(
@@ -86,7 +86,7 @@ def test_monthly_writing_completes_before_collection_state(
     tmp_path, collector, monkeypatch, failure
 ):
     monkeypatch.chdir(tmp_path)
-    display = BackfillProgress(io.StringIO())
+    display = CollectProgress(io.StringIO())
     write_report = module._write_report
     read_report = state.report_from_json
     temporary_file = state.tempfile.NamedTemporaryFile
@@ -164,7 +164,7 @@ def test_monthly_writing_completes_before_collection_state(
 
     def run():
         with display:
-            backfill("o", "r", output_directory="reports")
+            collect("o", "r", output_directory="reports")
 
     if failure:
         with pytest.raises(OSError, match=f"state {failure} failed"):
@@ -226,7 +226,7 @@ def test_monthly_writing_completes_before_collection_state(
 )
 def test_invalid_range_before_collection(tmp_path, collector, start, end):
     with pytest.raises(ValueError):
-        backfill("o", "r", start, end, output_directory=tmp_path)
+        collect("o", "r", start, end, output_directory=tmp_path)
     assert not collector
     assert not list(tmp_path.iterdir())
 
@@ -234,7 +234,7 @@ def test_invalid_range_before_collection(tmp_path, collector, start, end):
 @pytest.mark.parametrize("owner,repo", [("", "r"), ("o/r", "r"), ("o", " ")])
 def test_invalid_repository(tmp_path, collector, owner, repo):
     with pytest.raises(ValueError):
-        backfill(owner, repo, output_directory=tmp_path)
+        collect(owner, repo, output_directory=tmp_path)
     assert not collector
 
 
@@ -259,7 +259,7 @@ def test_bad_destination_before_collection(tmp_path, collector, empty, problem):
         )
         (tmp_path / "2024-01.json").write_text(report_to_json(other))
     with pytest.raises(ValueError):
-        backfill("o", "r", output_directory=tmp_path)
+        collect("o", "r", output_directory=tmp_path)
     assert not collector
 
 
@@ -272,13 +272,13 @@ def test_bad_destination_before_collection(tmp_path, collector, empty, problem):
     ],
 )
 def test_automatic_endpoints(tmp_path, collector, start, end, expected):
-    paths = backfill("o", "r", start, end, output_directory=tmp_path)
+    paths = collect("o", "r", start, end, output_directory=tmp_path)
     assert [p.stem for p in paths] == expected
     assert len(collector) == 1
 
 
 @pytest.mark.parametrize("option", [{"mode": "monthly"}, {"discovery": "bounded"}])
-def test_removed_python_backfill_options(tmp_path, collector, option):
+def test_removed_python_collect_options(tmp_path, collector, option):
     with pytest.raises(TypeError):
-        backfill("o", "r", output_directory=tmp_path, **option)
+        collect("o", "r", output_directory=tmp_path, **option)
     assert not collector

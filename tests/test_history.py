@@ -1,4 +1,4 @@
-"""History-first collection, offline projection, and backfill acceptance."""
+"""History-first collection, offline projection, and collect acceptance."""
 
 import importlib
 import logging
@@ -29,7 +29,7 @@ from .github import (
 )
 from .helpers import Response, Session, errors, repository, without_run_ids
 
-backfill_module = importlib.import_module("repo_history.backfill")
+collect_module = importlib.import_module("repo_history.collect")
 NOW = datetime(2024, 4, 15, tzinfo=timezone.utc)
 
 
@@ -219,7 +219,7 @@ def session(monkeypatch):
     )
     monkeypatch.setattr("requests.Session", lambda: result)
     monkeypatch.setattr(module, "_utc_now", lambda: NOW)
-    monkeypatch.setattr(backfill_module, "_utc_now", lambda: NOW)
+    monkeypatch.setattr(collect_module, "_utc_now", lambda: NOW)
     monkeypatch.setattr("repo_history.transport.time.sleep", lambda _: None)
     return result
 
@@ -250,7 +250,7 @@ def test_snapshot_and_offline_months(session):
     assert {a.type for a in snapshot.activities} == set(api.ACTIVITY_TYPES)
     assert not any("pending" in a.id for a in snapshot.activities)
     assert reports[-1].activities == reports[-1].actors == ()
-    assert reports[-1].metadata.ongoing
+    assert reports[-1].metadata.is_partial
     assert reports[2].metadata.month_end - reports[2].metadata.month_start == timedelta(
         days=29
     )
@@ -294,9 +294,9 @@ def test_snapshot_and_offline_months(session):
     )
 
 
-def test_backfill_collects_once_and_groups_offline(session, tmp_path, caplog):
+def test_collect_collects_once_and_groups_offline(session, tmp_path, caplog):
     caplog.set_level(logging.INFO, logger="repo_history")
-    paths = api.backfill(
+    paths = api.collect(
         "o", "r", "2024-01", "2024-03", output_directory=tmp_path, token="test"
     )
     assert [p.stem for p in paths] == ["2024-01", "2024-02", "2024-03"]
@@ -377,7 +377,7 @@ def test_collection_failure_keeps_existing_files(session, tmp_path, failure, cap
         "conflict": connection("timelineItems", [event(date="2024-02-02T00:00:00Z")]),
     }[failure]
     with pytest.raises(api.GitHubAPIError):
-        api.backfill(
+        api.collect(
             "o", "r", "2024-01", "2024-03", output_directory=tmp_path, token="test"
         )
     assert original.read_bytes() == before
@@ -391,7 +391,7 @@ def test_destination_identity_checked_before_traversal(session, tmp_path):
     session.calls.clear()
     session.repository.body["data"]["repository"]["id"] = "R_other"
     with pytest.raises(api.ReportWriteError):
-        api.backfill("o", "r", output_directory=tmp_path, token="test")
+        api.collect("o", "r", output_directory=tmp_path, token="test")
     assert len(session.calls) == 1
     assert session.closed
 
@@ -402,24 +402,24 @@ def test_destination_scanned_once_and_writing_failure_preserves_completed(
     from repo_history._progress import listen
 
     checks = []
-    check = backfill_module._check_directory
+    check = collect_module._check_directory
     monkeypatch.setattr(
-        backfill_module,
+        collect_module,
         "_check_directory",
         lambda *args: (checks.append(args), check(*args))[1],
     )
-    writer = backfill_module._write_report
+    writer = collect_module._write_report
 
     def fail_second(report, directory, **kwargs):
         if report.metadata.month == "2024-02":
             raise OSError("disk full")
         return writer(report, directory, **kwargs)
 
-    monkeypatch.setattr(backfill_module, "_write_report", fail_second)
+    monkeypatch.setattr(collect_module, "_write_report", fail_second)
     written = []
     events = []
     with listen(events.append), pytest.raises(OSError, match="disk full"):
-        backfill_module._run_backfill(
+        collect_module._run_collect(
             "o",
             "r",
             "2024-01",
@@ -448,7 +448,7 @@ def test_invalid_later_report_does_not_write_earlier_month(session, tmp_path):
     )
     events = []
     with listen(events.append), pytest.raises(api.ReportValidationError):
-        api.backfill(
+        api.collect(
             "o", "r", "2024-01", "2024-03", output_directory=tmp_path, token="test"
         )
     assert not list(tmp_path.iterdir())
@@ -463,9 +463,9 @@ def test_invalid_later_report_does_not_write_earlier_month(session, tmp_path):
     "kwargs",
     [{"start": "bad"}, {"end": "2024-05"}],
 )
-def test_invalid_backfill_before_network(session, tmp_path, kwargs):
+def test_invalid_collect_before_network(session, tmp_path, kwargs):
     with pytest.raises(ValueError):
-        api.backfill("o", "r", output_directory=tmp_path, token="test", **kwargs)
+        api.collect("o", "r", output_directory=tmp_path, token="test", **kwargs)
     assert not session.calls
 
 
@@ -477,7 +477,7 @@ def test_cli_history_default_and_discovery_error(
     assert (
         cli.main(
             [
-                "backfill",
+                "collect",
                 "o/r",
                 "--start",
                 "2024-02",
@@ -497,7 +497,7 @@ def test_cli_history_default_and_discovery_error(
     with pytest.raises(SystemExit) as error:
         cli.main(
             [
-                "backfill",
+                "collect",
                 "o/r",
                 "--discovery",
                 "full",
@@ -741,7 +741,7 @@ def test_progress_preserves_reports_and_request_counts(session, tmp_path):
         )
         connection["totalCount"] = total
 
-    paths = api.backfill(
+    paths = api.collect(
         "o",
         "r",
         "2024-01",
@@ -754,7 +754,7 @@ def test_progress_preserves_reports_and_request_counts(session, tmp_path):
     session.calls.clear()
     events = []
     with listen(events.append):
-        paths = api.backfill(
+        paths = api.collect(
             "o",
             "r",
             "2024-01",

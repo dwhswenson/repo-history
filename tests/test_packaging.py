@@ -32,6 +32,7 @@ def test_distributions_and_isolated_wheel_install(tmp_path):
     wheel = Path(ProjectBuilder(str(source)).build("wheel", str(output)))
     with zipfile.ZipFile(wheel) as archive:
         assert SCHEMA in archive.namelist()
+        assert "repo_history/schemas/viz-summary-v1.json" in archive.namelist()
         schema = json.loads(archive.read(SCHEMA))
         assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
     # Share only runtime dependencies; install our package into the fresh venv.
@@ -70,8 +71,8 @@ assert r.load_schema()['$id'] == 'urn:repo-history-tracking:monthly-report:1'
 from repo_history.queries import REPOSITORY_QUERY, PAGE_INFO_FRAGMENT
 assert 'query RepositoryLookup' in REPOSITORY_QUERY
 assert 'endCursor' in PAGE_INFO_FRAGMENT
-for name in ('collect_history', 'history_to_months', 'build_manifest', 'write_manifest', 'GraphQLClient', 'resolve_token', 'RepositorySnapshot',
-             'write_report', 'backfill', 'ReportWriteError',
+for name in ('collect_history', 'history_to_months', 'build_summary', 'write_summary', 'GraphQLClient', 'resolve_token', 'RepositorySnapshot',
+             'write_report', 'collect', 'ReportWriteError',
              'lookup_repository', 'GitHubAPIError', 'AuthenticationError',
              'TransportError', 'GraphQLError', 'RateLimitError',
              'PaginationError', 'RepositoryUnavailableError', 'QueryResourceError'):
@@ -95,10 +96,10 @@ for text in json.load(sys.stdin):
     ):
         for arguments in (
             ["--help"],
-            ["backfill", "--help"],
+            ["collect", "--help"],
             ["update", "--help"],
             ["summarize", "--help"],
-            ["chop-partial", "--help"],
+            ["trim-partial", "--help"],
         ):
             result = subprocess.run(
                 [*command, *arguments],
@@ -107,17 +108,17 @@ for text in json.load(sys.stdin):
                 text=True,
                 check=True,
             )
-            if arguments[0] in ("backfill", "update"):
+            if arguments[0] in ("collect", "update"):
                 assert "--output-directory" in result.stdout
                 assert "--discovery" not in result.stdout
                 assert "--mode" not in result.stdout
             elif arguments[0] == "summarize":
                 assert "--input-directory" in result.stdout
-            elif arguments[0] == "chop-partial":
-                assert "MANIFEST" in result.stdout
+            elif arguments[0] == "trim-partial":
+                assert "SUMMARY" in result.stdout
                 assert "--quiet" in result.stdout and "--verbose" in result.stdout
             else:
                 assert all(
                     name in result.stdout
-                    for name in ("backfill", "update", "summarize", "chop-partial")
+                    for name in ("collect", "update", "summarize", "trim-partial")
                 )

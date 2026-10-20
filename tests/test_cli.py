@@ -14,7 +14,7 @@ from repo_history import (
     update,
 )
 
-backfill_module = importlib.import_module("repo_history.backfill")
+collect_module = importlib.import_module("repo_history.collect")
 NOW = datetime(2024, 3, 1, tzinfo=timezone.utc)
 
 
@@ -45,7 +45,7 @@ def collector(monkeypatch):
     def snapshot(*args, **kwargs):
         return collect(*args, **kwargs), "bounded", "bounded"
 
-    monkeypatch.setattr(backfill_module, "_collect_history", collect)
+    monkeypatch.setattr(collect_module, "_collect_history", collect)
     monkeypatch.setattr(update, "_collect_snapshot", snapshot)
     monkeypatch.setattr(cli, "_utc_now", lambda: NOW)
     return calls
@@ -89,7 +89,7 @@ def test_verbosity(tmp_path, collector, capsys, flag):
         assert "2024-02.json" in out and "debug details" in err
 
 
-@pytest.mark.parametrize("command", ["backfill", "update"])
+@pytest.mark.parametrize("command", ["collect", "update"])
 @pytest.mark.parametrize(
     "option,value",
     [
@@ -107,7 +107,7 @@ def test_removed_strategy_flags(tmp_path, collector, command, option, value):
     assert not collector
 
 
-@pytest.mark.parametrize("command", ["backfill", "update"])
+@pytest.mark.parametrize("command", ["collect", "update"])
 @pytest.mark.parametrize("repository", ["owner", "o/r/extra", "/r", "o/", " o/r"])
 def test_bad_repository(tmp_path, collector, command, repository):
     with pytest.raises(SystemExit) as exc:
@@ -120,7 +120,7 @@ def test_bad_repository(tmp_path, collector, command, repository):
     [
         [],
         ["o/r"],
-        ["manifest"],
+        ["summary"],
         ["update", "o/r"],
         ["update", "o/r", "--start", "2024-2"],
         ["update", "o/r", "--start", "2024-13"],
@@ -144,15 +144,15 @@ def test_invalid_arguments(tmp_path, collector, arguments):
     "arguments",
     [
         [],
-        ["manifest.json", "--quiet", "--verbose"],
-        ["manifest.json", "--start", "2024-03"],
+        ["summary.json", "--quiet", "--verbose"],
+        ["summary.json", "--start", "2024-03"],
         ["first.json", "second.json"],
         ["first.json", "second.json", "--output", "output.json"],
     ],
 )
 def test_chop_invalid_arguments(collector, arguments):
     with pytest.raises(SystemExit) as exc:
-        cli.main(["chop-partial", *arguments])
+        cli.main(["trim-partial", *arguments])
     assert exc.value.code == 2 and not collector
 
 
@@ -177,7 +177,7 @@ def test_expected_errors(tmp_path, collector, monkeypatch, capsys, error):
 
 
 @pytest.mark.parametrize(
-    "command", [None, "backfill", "update", "summarize", "chop-partial"]
+    "command", [None, "collect", "update", "summarize", "trim-partial"]
 )
 def test_help(command, capsys):
     with pytest.raises(SystemExit) as exc:
@@ -187,14 +187,14 @@ def test_help(command, capsys):
     assert "--mode" not in out and "--discovery" not in out
     if command is None:
         assert all(
-            name in out for name in ("backfill", "update", "summarize", "chop-partial")
+            name in out for name in ("collect", "update", "summarize", "trim-partial")
         )
     elif command == "summarize":
         assert "--input-directory" in out
-    elif command == "chop-partial":
-        assert "MANIFEST" in out and "--quiet" in out and "--verbose" in out
+    elif command == "trim-partial":
+        assert "SUMMARY" in out and "--quiet" in out and "--verbose" in out
         assert "--output" in out and "-o" in out
-        assert "directory containing manifest.json" in out
+        assert "directory containing summary.json" in out
     else:
         assert "--start" in out and "--end" in out
 
@@ -242,23 +242,23 @@ def test_real_collector_missing_authentication(tmp_path, monkeypatch, capsys):
         (["--quiet"], False),
     ],
 )
-def test_backfill_progress_modes(
+def test_collect_progress_modes(
     tmp_path, collector, capsys, monkeypatch, flags, progress
 ):
     from repo_history._progress import enabled
 
-    actual = backfill_module._collect_history
+    actual = collect_module._collect_history
     active = []
 
     def collect(*args, **kwargs):
         active.append(enabled())
         return actual(*args, **kwargs)
 
-    monkeypatch.setattr(backfill_module, "_collect_history", collect)
+    monkeypatch.setattr(collect_module, "_collect_history", collect)
     assert (
         cli.main(
             [
-                "backfill",
+                "collect",
                 "o/r",
                 "--start",
                 "2024-02",
@@ -273,7 +273,7 @@ def test_backfill_progress_modes(
     )
     out, err = capsys.readouterr()
     assert active == [progress]
-    assert ("Backfill Preparing" in err) == progress
+    assert ("Collect Preparing" in err) == progress
     assert ("points spent" in err) == progress
     assert "\x1b" not in err
     assert out == ("" if "--quiet" in flags else str(tmp_path / "2024-02.json") + "\n")
@@ -283,21 +283,21 @@ def test_backfill_progress_modes(
 def test_update_fallback_has_no_progress(tmp_path, collector, monkeypatch, capsys):
     from repo_history._progress import enabled
 
-    actual = backfill_module._collect_history
+    actual = collect_module._collect_history
     active = []
 
     def collect(*args, **kwargs):
         active.append(enabled())
         return actual(*args, **kwargs)
 
-    monkeypatch.setattr(backfill_module, "_collect_history", collect)
+    monkeypatch.setattr(collect_module, "_collect_history", collect)
     assert cli.main(["update", "o/r", "--output-directory", str(tmp_path)]) == 0
     assert active == [False]
-    assert "Backfill Preparing" not in capsys.readouterr().err
+    assert "Collect Preparing" not in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("flags", [[], ["--verbose"], ["--no-progress"]])
-def test_backfill_error_restores_progress_and_logging(
+def test_collect_error_restores_progress_and_logging(
     tmp_path, collector, monkeypatch, capsys, flags
 ):
     from repo_history._progress import enabled
@@ -305,11 +305,11 @@ def test_backfill_error_restores_progress_and_logging(
     def fail(*args, **kwargs):
         raise AuthenticationError("missing token")
 
-    monkeypatch.setattr(backfill_module, "_collect_history", fail)
+    monkeypatch.setattr(collect_module, "_collect_history", fail)
     logger = logging.getLogger("repo_history")
     original = logger.level, logger.propagate, logger.handlers[:]
     assert (
-        cli.main(["backfill", "o/r", "--output-directory", str(tmp_path), *flags]) == 1
+        cli.main(["collect", "o/r", "--output-directory", str(tmp_path), *flags]) == 1
     )
     assert "missing token" in capsys.readouterr().err
     assert (logger.level, logger.propagate, logger.handlers) == original
@@ -346,7 +346,7 @@ def test_live_writing_replaces_terminal_paths_but_preserves_pipelines(
     assert (
         cli.main(
             [
-                "backfill",
+                "collect",
                 "o/r",
                 "--start",
                 "2024-02",

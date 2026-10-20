@@ -1,7 +1,7 @@
 """Monthly repository activity contract, independent of GitHub collection."""
 
 from .authentication import resolve_token
-from .backfill import backfill
+from .collect import collect
 from .errors import (
     AuthenticationError,
     GitHubAPIError,
@@ -15,8 +15,7 @@ from .errors import (
     TransportError,
 )
 from .history import collect_history, history_to_months
-from .identities import git_identity_key, unresolved_git_actor
-from .manifest import build_manifest, write_manifest
+from .identities import git_identity_key, unlinked_git_actor
 from .models import (
     ACTIVITY_TYPES,
     Activity,
@@ -33,11 +32,11 @@ from .models import (
     MonthlyReport,
     MonthlySummaries,
     PopulationCounts,
-    PRConversationCommentMetadata,
-    PRInlineReviewCommentMetadata,
+    PRDiscussionCommentMetadata,
     PRMergedMetadata,
     PROpenedMetadata,
     Provenance,
+    PRReviewCommentMetadata,
     PRReviewMetadata,
     ReportMetadata,
     RepositoryHistory,
@@ -49,6 +48,7 @@ from .repository import RepositorySnapshot, lookup_repository
 from .serialization import report_from_json, report_to_json
 from .state import load_collection_state_schema, validate_collection_state
 from .summaries import derive_summaries
+from .summary import build_summary, write_summary
 from .transport import GraphQLClient
 from .validation import load_schema, validate_report
 from .writing import write_report
@@ -60,12 +60,12 @@ __all__ = [
     "Coverage",
     "load_collection_state_schema",
     "validate_collection_state",
-    "build_manifest",
-    "write_manifest",
+    "build_summary",
+    "write_summary",
     "collect_history",
     "history_to_months",
     "RepositoryHistory",
-    "backfill",
+    "collect",
     "write_report",
     "ReportWriteError",
     "AuthenticationError",
@@ -93,8 +93,8 @@ __all__ = [
     "MonthlyReport",
     "MonthlySummaries",
     "PopulationCounts",
-    "PRConversationCommentMetadata",
-    "PRInlineReviewCommentMetadata",
+    "PRDiscussionCommentMetadata",
+    "PRReviewCommentMetadata",
     "PRMergedMetadata",
     "PROpenedMetadata",
     "PRReviewMetadata",
@@ -107,6 +107,6 @@ __all__ = [
     "load_schema",
     "report_from_json",
     "report_to_json",
-    "unresolved_git_actor",
+    "unlinked_git_actor",
     "validate_report",
 ]

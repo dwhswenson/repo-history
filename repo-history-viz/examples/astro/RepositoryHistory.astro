@@ -1,12 +1,12 @@
 ---
 interface Props {
-  manifest: string;
-  measures: string;
+  summary: string;
+  metrics: string;
 }
-const { manifest, measures } = Astro.props;
+const { summary, metrics } = Astro.props;
 ---
 
-<repo-history-viz manifest={manifest} measures={measures} hide-loader></repo-history-viz>
+<repo-history-viz summary={summary} metrics={metrics} hide-loader></repo-history-viz>
 
 <script>
   import "repo-history-viz/register";

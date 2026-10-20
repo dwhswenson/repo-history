@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from ._progress import emit
 from .collection import _actor, _field, _in_interval, _object, _string, _timestamp
 from .errors import GraphQLError, PaginationError
-from .identities import unresolved_git_actor
+from .identities import unlinked_git_actor
 from .models import Activity, CommitMetadata, Credit, GitIdentity, Subject
 from .queries import (
     COMMIT_ACTOR_QUERY,
@@ -60,7 +60,7 @@ def _identity(value, operation, client, records, resolved):
     name = _string(item, "name", operation, nullable=True, empty=True)
     email = _string(item, "email", operation, nullable=True, empty=True)
     user = _field(item, "user", operation)
-    actor = unresolved_git_actor(email, name)
+    actor = unlinked_git_actor(email, name)
     if user is not None:
         linked = _actor(user, operation)
         # GitActor.user can project a Bot as User (e.g. Copilot), even changing

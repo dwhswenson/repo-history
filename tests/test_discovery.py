@@ -640,14 +640,14 @@ def test_shared_histories_produce_identical_complete_reports(
     assert full.activities == bounded_report.activities
     assert full.actors == bounded_report.actors
     assert full.summaries == bounded_report.summaries
-    assert bounded_report.metadata.ongoing == (month == 4)
+    assert bounded_report.metadata.is_partial == (month == 4)
     if month == 2:
         kinds = {a.type for a in full.activities}
         assert {
             "pr_review",
-            "pr_inline_review_comment",
+            "pr_review_comment",
             "pr_merged",
-            "pr_conversation_comment",
+            "pr_discussion_comment",
         } <= kinds
         if issues_enabled:
             assert {
@@ -665,7 +665,7 @@ def test_counterexample_explicitly_demonstrates_unproven_completeness(monkeypatc
     optimized = run_source(monkeypatch, SourceSession(counterexample=True), "bounded")
     missing = {a.id for a in full.activities} - {a.id for a in optimized.activities}
     assert "pr_review:V_one" in missing
-    assert "pr_inline_review_comment:C_inline" in missing
+    assert "pr_review_comment:C_inline" in missing
     assert all(a.subject.node_id != "P_old" for a in optimized.activities)
     assert full.activities != optimized.activities
 

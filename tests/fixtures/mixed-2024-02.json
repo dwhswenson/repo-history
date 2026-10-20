@@ -269,7 +269,7 @@
           "role": "author"
         }
       ],
-      "id": "pr_conversation_comment:PC_1",
+      "id": "pr_discussion_comment:PC_1",
       "metadata": {
         "source_node_id": "PC_1"
       },
@@ -282,7 +282,7 @@
         "title": "An older PR",
         "url": "https://github.com/example/project/pull/2"
       },
-      "type": "pr_conversation_comment",
+      "type": "pr_discussion_comment",
       "url": "https://github.com/example/project/pull/2"
     },
     {
@@ -292,7 +292,7 @@
           "role": "author"
         }
       ],
-      "id": "pr_inline_review_comment:IN_1",
+      "id": "pr_review_comment:IN_1",
       "metadata": {
         "created_at": "2024-01-31T12:00:00Z",
         "outdated": true,
@@ -313,7 +313,7 @@
         "title": "An older PR",
         "url": "https://github.com/example/project/pull/2"
       },
-      "type": "pr_inline_review_comment",
+      "type": "pr_review_comment",
       "url": "https://github.com/example/project/pull/2"
     },
     {
@@ -323,7 +323,7 @@
           "role": "author"
         }
       ],
-      "id": "pr_inline_review_comment:IN_2",
+      "id": "pr_review_comment:IN_2",
       "metadata": {
         "created_at": "2024-02-15T12:00:00Z",
         "outdated": true,
@@ -344,7 +344,7 @@
         "title": "An older PR",
         "url": "https://github.com/example/project/pull/2"
       },
-      "type": "pr_inline_review_comment",
+      "type": "pr_review_comment",
       "url": "https://github.com/example/project/pull/2"
     },
     {
@@ -419,7 +419,7 @@
       "url": null
     },
     {
-      "classification": "unresolved_git",
+      "classification": "unlinked_git",
       "database_id": null,
       "display_name": null,
       "git_email": " Git@Example.ORG ",
@@ -430,7 +430,7 @@
       "url": null
     },
     {
-      "classification": "unresolved_git",
+      "classification": "unlinked_git",
       "database_id": null,
       "display_name": null,
       "git_email": null,
@@ -450,10 +450,10 @@
     },
     "default_branch": "main",
     "default_branch_head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "is_partial": false,
     "month": "2024-02",
     "month_end": "2024-03-01T00:00:00Z",
     "month_start": "2024-02-01T00:00:00Z",
-    "ongoing": false,
     "provenance": {
       "created_by": {
         "collection_since": "2024-02-01T00:00:00Z",
@@ -516,11 +516,11 @@
         "issue_comment": 0,
         "issue_opened": 0,
         "issue_reopened": 0,
-        "pr_conversation_comment": 1,
-        "pr_inline_review_comment": 1,
+        "pr_discussion_comment": 1,
         "pr_merged": 0,
         "pr_opened": 0,
-        "pr_review": 0
+        "pr_review": 0,
+        "pr_review_comment": 1
       },
       "U_author": {
         "commit": 1,
@@ -528,11 +528,11 @@
         "issue_comment": 0,
         "issue_opened": 1,
         "issue_reopened": 0,
-        "pr_conversation_comment": 0,
-        "pr_inline_review_comment": 0,
+        "pr_discussion_comment": 0,
         "pr_merged": 0,
         "pr_opened": 1,
-        "pr_review": 0
+        "pr_review": 0,
+        "pr_review_comment": 0
       },
       "U_performer": {
         "commit": 0,
@@ -540,11 +540,11 @@
         "issue_comment": 0,
         "issue_opened": 0,
         "issue_reopened": 2,
-        "pr_conversation_comment": 0,
-        "pr_inline_review_comment": 1,
+        "pr_discussion_comment": 0,
         "pr_merged": 1,
         "pr_opened": 0,
-        "pr_review": 1
+        "pr_review": 1,
+        "pr_review_comment": 1
       },
       "git:email:b570f308b3fa3badb2c9eff5583f76ca8988ddde915a41d1b74465f507d182f4": {
         "commit": 1,
@@ -552,11 +552,11 @@
         "issue_comment": 0,
         "issue_opened": 0,
         "issue_reopened": 0,
-        "pr_conversation_comment": 0,
-        "pr_inline_review_comment": 0,
+        "pr_discussion_comment": 0,
         "pr_merged": 0,
         "pr_opened": 0,
-        "pr_review": 0
+        "pr_review": 0,
+        "pr_review_comment": 0
       },
       "git:name:11ab89b0bbeeb7f5778466c8a2eefb39ad1b4008ebfaa0364baed0b8fb69542c": {
         "commit": 1,
@@ -564,79 +564,79 @@
         "issue_comment": 0,
         "issue_opened": 0,
         "issue_reopened": 0,
-        "pr_conversation_comment": 0,
-        "pr_inline_review_comment": 0,
+        "pr_discussion_comment": 0,
         "pr_merged": 0,
         "pr_opened": 0,
-        "pr_review": 0
+        "pr_review": 0,
+        "pr_review_comment": 0
       }
     },
     "distinct_actors": {
       "bot": 1,
       "human": 2,
       "total": 5,
-      "unresolved_git": 2
+      "unlinked_git": 2
     },
     "distinct_actors_by_type": {
       "commit": {
         "bot": 0,
         "human": 1,
         "total": 3,
-        "unresolved_git": 2
+        "unlinked_git": 2
       },
       "issue_closed": {
         "bot": 0,
         "human": 1,
         "total": 1,
-        "unresolved_git": 0
+        "unlinked_git": 0
       },
       "issue_comment": {
         "bot": 0,
         "human": 0,
         "total": 0,
-        "unresolved_git": 0
+        "unlinked_git": 0
       },
       "issue_opened": {
         "bot": 0,
         "human": 1,
         "total": 1,
-        "unresolved_git": 0
+        "unlinked_git": 0
       },
       "issue_reopened": {
         "bot": 0,
         "human": 1,
         "total": 1,
-        "unresolved_git": 0
+        "unlinked_git": 0
       },
-      "pr_conversation_comment": {
+      "pr_discussion_comment": {
         "bot": 1,
         "human": 0,
         "total": 1,
-        "unresolved_git": 0
-      },
-      "pr_inline_review_comment": {
-        "bot": 1,
-        "human": 1,
-        "total": 2,
-        "unresolved_git": 0
+        "unlinked_git": 0
       },
       "pr_merged": {
         "bot": 0,
         "human": 1,
         "total": 1,
-        "unresolved_git": 0
+        "unlinked_git": 0
       },
       "pr_opened": {
         "bot": 0,
         "human": 1,
         "total": 1,
-        "unresolved_git": 0
+        "unlinked_git": 0
       },
       "pr_review": {
         "bot": 0,
         "human": 1,
         "total": 1,
-        "unresolved_git": 0
+        "unlinked_git": 0
+      },
+      "pr_review_comment": {
+        "bot": 1,
+        "human": 1,
+        "total": 2,
+        "unlinked_git": 0
       }
     },
     "repository_counts": {
@@ -645,11 +645,11 @@
       "issue_comment": 1,
       "issue_opened": 1,
       "issue_reopened": 2,
-      "pr_conversation_comment": 1,
-      "pr_inline_review_comment": 2,
+      "pr_discussion_comment": 1,
       "pr_merged": 1,
       "pr_opened": 1,
-      "pr_review": 1
+      "pr_review": 1,
+      "pr_review_comment": 2
     },
     "unattributed_by_type": {
       "commit": 0,
@@ -657,11 +657,11 @@
       "issue_comment": 1,
       "issue_opened": 0,
       "issue_reopened": 0,
-      "pr_conversation_comment": 0,
-      "pr_inline_review_comment": 0,
+      "pr_discussion_comment": 0,
       "pr_merged": 0,
       "pr_opened": 0,
-      "pr_review": 0
+      "pr_review": 0,
+      "pr_review_comment": 0
     },
     "unattributed_total": 1
   }

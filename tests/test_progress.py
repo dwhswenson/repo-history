@@ -1,4 +1,4 @@
-"""Backfill telemetry, terminal lifecycle, and plain progress behavior."""
+"""Collect telemetry, terminal lifecycle, and plain progress behavior."""
 
 import io
 import logging
@@ -11,7 +11,7 @@ import requests
 from repo_history import GraphQLError, PaginationError
 from repo_history import _terminal as terminal
 from repo_history._progress import Usage, emit, enabled, listen
-from repo_history._terminal import BackfillProgress
+from repo_history._terminal import CollectProgress
 from repo_history.queries import (
     COMMIT_HISTORY_QUERY,
     HISTORY_ISSUES_QUERY,
@@ -161,7 +161,7 @@ def test_missing_and_invalid_page_totals_are_advisory(
         progress_page(path, [{"id": "a"}], total=total, more=True, cursor="next"),
         progress_page(path, [{"id": "b"}], total=2),
     ]
-    with BackfillProgress(io.StringIO()) as display:
+    with CollectProgress(io.StringIO()) as display:
         emit("start", stage=stage)
         assert list(
             client.iter_connection(
@@ -249,7 +249,7 @@ def test_usage_snapshots_cover_every_attempt_and_preserve_budget(client):
 
 @pytest.mark.parametrize("invalid", [None, True, -1, "2", 2.5])
 def test_invalid_totals_are_advisory(invalid):
-    display = BackfillProgress(io.StringIO())
+    display = CollectProgress(io.StringIO())
     with display:
         emit("start", stage="Issues")
         emit("total", stage="Issues", total=invalid)
@@ -261,7 +261,7 @@ def test_invalid_totals_are_advisory(invalid):
 
 
 def test_underestimated_total_does_not_complete_stage():
-    display = BackfillProgress(io.StringIO())
+    display = CollectProgress(io.StringIO())
     with display:
         emit("start", stage="PRs")
         emit("total", stage="PRs", total=1)
@@ -280,7 +280,7 @@ def test_plain_updates_throttled_but_transitions_and_retries_immediate(
     now = [0]
     monkeypatch.setattr(terminal, "monotonic", lambda: now[0])
     caplog.set_level(logging.INFO, logger="repo_history._terminal")
-    with BackfillProgress(io.StringIO()):
+    with CollectProgress(io.StringIO()):
         emit("start", stage="Issues")
         emit("total", stage="Issues", total=10)
         caplog.clear()
@@ -303,7 +303,7 @@ def test_plain_updates_throttled_but_transitions_and_retries_immediate(
 )
 def test_failed_display_cleans_up_and_preserves_completed_count(exception, status):
     stream = TTY()
-    display = BackfillProgress(stream)
+    display = CollectProgress(stream)
     with pytest.raises(exception), display:
         emit("start", stage="PRs")
         emit("total", stage="PRs", total=10)
@@ -318,7 +318,7 @@ def test_failed_display_cleans_up_and_preserves_completed_count(exception, statu
 
 def test_interactive_details_logs_and_stdout_stay_separate(capsys):
     stream = TTY()
-    display = BackfillProgress(stream)
+    display = CollectProgress(stream)
     display.console.width = 60
     handler = display.log_handler()
     handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
@@ -361,18 +361,18 @@ def test_interactive_details_logs_and_stdout_stay_separate(capsys):
 
 
 def test_verbose_uses_plain_output_even_on_tty():
-    display = BackfillProgress(TTY(), verbose=True)
+    display = CollectProgress(TTY(), verbose=True)
     assert display.live is None
     assert display.log_handler() is None
 
 
 def test_dumb_terminal_uses_plain_output(monkeypatch):
     monkeypatch.setenv("TERM", "dumb")
-    assert BackfillProgress(TTY()).live is None
+    assert CollectProgress(TTY()).live is None
 
 
 def test_failed_start_restores_context(monkeypatch):
-    display = BackfillProgress(TTY())
+    display = CollectProgress(TTY())
     monkeypatch.setattr(display.live, "start", lambda: (_ for _ in ()).throw(OSError()))
     with pytest.raises(OSError):
         display.__enter__()

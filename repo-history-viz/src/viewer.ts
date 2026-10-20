@@ -2,28 +2,28 @@ import styles from "./style.css?inline";
 import {
   ACTIVITY_LABELS,
   ACTIVITY_TYPES,
-  loadManifest,
+  loadSummary,
   nextMonth,
-  parseManifest,
+  parseSummary,
   type ActivityType,
   type Classification,
-  type Manifest,
+  type HistorySummary,
   type MonthSummary,
-  type ManifestSource,
+  type HistorySummarySource,
 } from "./report.js";
 import { aggregate, type ViewState, type PlotData } from "./series.js";
 import { chartCsv } from "./csv.js";
 import { COLORS, renderChart } from "./chart.js";
 import type { Chart } from "chart.js";
 
-const MEASURES = {
+const METRICS = {
   commits: "Commits",
-  "github-activities": "GitHub Activities",
-  contributors: "Contributors by type",
+  "github-activities": "GitHub activity",
+  "contributors-by-type": "Contributors by type",
   "total-contributors": "Total contributors",
   balance: "Issue / PR balance",
 } as const;
-type Measure = keyof typeof MEASURES;
+type Metric = keyof typeof METRICS;
 
 export function createViewer(
   root: ShadowRoot,
@@ -39,30 +39,30 @@ export function createViewer(
   <main>
     <p id="configuration-error" class="error card" role="alert" hidden></p>
     <section class="loader card" aria-labelledby="load-heading">
-      <div><h2 id="load-heading">Load your manifest</h2><p>Explore monthly GitHub activity across a selected set of repositories.</p></div>
+      <div><h2 id="load-heading">Load your summary</h2><p>Explore monthly GitHub activity across a selected set of repositories.</p></div>
       <div class="load-options">
-        <label class="file-button">Choose manifest JSON<input id="files" type="file" accept=".json,application/json" aria-label="Choose manifest JSON"></label>
+        <label class="file-button">Choose summary JSON<input id="files" type="file" accept=".json,application/json" aria-label="Choose summary JSON"></label>
         <span class="or">or</span>
-        <form id="manifest-form"><label for="manifest">Hosted manifest URL</label><div class="url-row"><input id="manifest" type="text" placeholder="https://example.org/reports/manifest.json" required><button id="load-url" type="submit">Load URL</button></div></form>
+        <form id="summary-form"><label for="summary">Hosted summary URL</label><div class="url-row"><input id="summary" type="text" placeholder="https://example.org/reports/summary.json" required><button id="load-url" type="submit">Load URL</button></div></form>
       </div>
       <p id="load-status" role="status" aria-live="polite">Local files are processed in your browser.</p>
       <p id="load-error" class="error" role="alert" hidden></p>
     </section>
-    <section id="empty" class="empty card"><div class="empty-icon" aria-hidden="true">▥</div><h2>A clearer view of repository activity</h2><p>Choose a manifest file or load a hosted manifest to compare contributions and discover how your contributor community grows.</p><div class="empty-tags"><span>Monthly activity</span><span>Cumulative trends</span><span>Unique contributors</span></div></section>
+    <section id="empty" class="empty card"><div class="empty-icon" aria-hidden="true">▥</div><h2>A clearer view of repository activity</h2><p>Choose a summary file or load a hosted summary to compare contributions and discover how your contributor community grows.</p><div class="empty-tags"><span>Monthly activity</span><span>Cumulative trends</span><span>Unique contributors</span></div></section>
     <section id="dashboard" hidden>
       <div class="repository-heading"><div><p class="eyebrow">REPOSITORY HISTORY</p><h2 id="repository-name"></h2></div><p id="report-summary"></p></div>
       <div class="workspace">
         <aside class="controls card" aria-label="Chart controls">
           <fieldset id="month-controls"><legend>Month range</legend><div class="month-range-values"><label for="start">From<output id="start-label" for="start"></output></label><label for="end">Through<output id="end-label" for="end"></output></label></div><div id="month-range" class="month-range"><div class="month-range-track" aria-hidden="true"><span id="month-selection"></span></div><input id="start" type="range" min="0" max="0" step="1" value="0"><input id="end" type="range" min="0" max="0" step="1" value="0"></div><button id="reset-range" class="text-button" type="button">All available months</button></fieldset>
-          <fieldset><legend><label for="metric">Measure</label></legend><select id="metric"></select></fieldset>
-          <fieldset><legend>Chart</legend><div class="segmented"><label><input type="radio" name="mode" value="monthly" checked><span>Monthly</span></label><label><input type="radio" name="mode" value="cumulative"><span>Cumulative</span></label></div></fieldset>
-          <fieldset id="contribution-types"><legend>Contribution types</legend><div class="selection-actions"><button id="select-all" class="text-button" type="button">Select all</button><button id="select-none" class="text-button" type="button">Clear</button></div><div class="type-list">${ACTIVITY_TYPES.map((type, index) => `<label><input type="checkbox" name="activity" value="${type}" checked><span class="swatch" style="background:${COLORS[index]}"></span>${ACTIVITY_LABELS[type]}</label>`).join("")}</div><label class="combined"><input id="combined" type="checkbox">Show selected types combined</label></fieldset>
+          <fieldset><legend><label for="metric">Metric</label></legend><select id="metric"></select></fieldset>
+          <fieldset><legend>Aggregation</legend><div class="segmented"><label><input type="radio" name="mode" value="monthly" checked><span>Monthly</span></label><label><input type="radio" name="mode" value="cumulative"><span>Cumulative</span></label></div></fieldset>
+          <fieldset id="activity-types"><legend>Activity types</legend><div class="selection-actions"><button id="select-all" class="text-button" type="button">Select all</button><button id="select-none" class="text-button" type="button">Clear</button></div><div class="type-list">${ACTIVITY_TYPES.map((type, index) => `<label><input type="checkbox" name="activity" value="${type}" checked><span class="swatch" style="background:${COLORS[index]}"></span>${ACTIVITY_LABELS[type]}</label>`).join("")}</div><label class="combined"><input id="combined" type="checkbox">Show combined total</label></fieldset>
           <fieldset id="balance-types" hidden><legend>Show balance for</legend><label><input type="checkbox" name="balance-type" value="issues" checked>Issues</label><label><input type="checkbox" name="balance-type" value="prs" checked>Pull requests</label></fieldset>
-          <fieldset id="classifications" hidden><legend id="classification-legend">Contributor identities</legend><label><input type="checkbox" name="classification" value="human" checked>Human GitHub accounts</label><label><input type="checkbox" name="classification" value="unresolved_git" checked><span id="undetermined-label">Unresolved Git identities</span></label><label><input type="checkbox" name="classification" value="bot">Known bots</label></fieldset>
+          <fieldset id="classifications" hidden><legend id="classification-legend">Contributor identities</legend><label><input type="checkbox" name="classification" value="human" checked>Human GitHub accounts</label><label><input type="checkbox" name="classification" value="unlinked_git" checked><span id="unknown-actors-label">Unlinked Git identities</span></label><label><input type="checkbox" name="classification" value="bot">Known bots</label></fieldset>
         </aside>
         <div class="results">
-          <section class="chart-card card" aria-labelledby="chart-title"><div class="chart-heading"><div><p class="eyebrow" id="chart-subtitle"></p><h2 id="chart-title"></h2></div><div class="chart-downloads"><button id="download-chart" class="text-button" type="button">Download PNG</button><button id="download-data" class="text-button" type="button">Download Data (CSV)</button></div></div><p id="chart-note" class="chart-note"></p><p id="warnings" class="warning" role="status" hidden></p><p id="no-series" class="warning" hidden>Select at least one contribution type to draw a chart.</p><div class="chart-wrap"><canvas id="chart" role="img" aria-label="Repository activity chart. Exact values are available through Download Data (CSV)."></canvas></div></section>
-          <details id="repository-details" class="card coverage-card" hidden><summary>Included repositories</summary><ul id="repository-list"></ul></details><details class="card coverage-card"><summary>About these counts and report coverage</summary><p>GitHub activity counts follow the actor filters, excluding known bots by default. Undetermined includes events with missing actors. Commit counts include all recorded commits. Contributor counts include only credited identities matching your filters. Contextual subject authors do not receive credit.</p><p>Unresolved Git identities are estimates and may represent the same person as another identity. A known account is tracked by its stable actor key, even if its login changes. Cumulative contributors are a union of identities, not a sum of monthly totals.</p><p>Missing reports are gaps, not zero activity. Cumulative charts resume from the last observed total and cover loaded months only. Ongoing months are partial snapshots.</p><ul id="coverage-list"></ul></details>
+          <section class="chart-card card" aria-labelledby="chart-title"><div class="chart-heading"><div><p class="eyebrow" id="chart-subtitle"></p><h2 id="chart-title"></h2></div><div class="chart-downloads"><button id="download-chart" class="text-button" type="button">Download PNG</button><button id="download-data" class="text-button" type="button">Download Data (CSV)</button></div></div><p id="chart-note" class="chart-note"></p><p id="warnings" class="warning" role="status" hidden></p><p id="no-series" class="warning" hidden>Select at least one activity type to draw a chart.</p><div class="chart-wrap"><canvas id="chart" role="img" aria-label="Repository activity chart. Exact values are available through Download Data (CSV)."></canvas></div></section>
+          <details id="repository-details" class="card coverage-card" hidden><summary>Included repositories</summary><ul id="repository-list"></ul></details><details class="card coverage-card"><summary>About these counts and report coverage</summary><p>GitHub activity counts follow the actor filters, excluding known bots by default. Events with missing performers are counted under Unknown actors. Commit counts include all recorded commits. Contributor counts include only credited identities matching your filters. Contextual subject authors do not receive credit.</p><p>Unlinked Git identities are estimates and may represent the same person as another identity. A known account is tracked by its stable actor key, even if its login changes. Cumulative contributors are a union of identities, not a sum of monthly totals.</p><p>Missing reports are gaps, not zero activity. Cumulative charts resume from the last observed total and cover loaded months only. Partial months contain data only through their collection snapshot.</p><ul id="coverage-list"></ul></details>
         </div>
       </div>
     </section>
@@ -79,14 +79,14 @@ export function createViewer(
     metric: "github-activities",
     mode: "monthly",
     types: [...ACTIVITY_TYPES],
-    classifications: ["human", "unresolved_git"],
+    classifications: ["human", "unlinked_git"],
     combined: false,
     start: "",
     end: "",
   };
-  let measures: Measure[] = [];
+  let metrics: Metric[] = [];
   let reports: MonthSummary[] = [];
-  let manifest: Manifest | undefined;
+  let summary: HistorySummary | undefined;
   let months: string[] = [];
   let generation = 0;
   let request: AbortController | undefined;
@@ -99,28 +99,28 @@ export function createViewer(
     target.hidden = !message;
   }
 
-  function setMeasures(value: string | null) {
+  function setMetrics(value: string | null) {
     const requested = value?.trim().split(/\s+/).filter(Boolean) ?? [];
-    const unknown = requested.filter((key) => !Object.hasOwn(MEASURES, key));
+    const unknown = requested.filter((key) => !Object.hasOwn(METRICS, key));
     const message = !requested.length
-      ? 'Set the "measures" attribute to explicitly enable at least one measure.'
+      ? 'Set the "metrics" attribute to explicitly enable at least one metric.'
       : unknown.length
-        ? `Unknown measures: ${unknown.join(", ")}. Supported measures: ${Object.keys(MEASURES).join(", ")}.`
+        ? `Unknown metrics: ${unknown.join(", ")}. Supported metrics: ${Object.keys(METRICS).join(", ")}.`
         : "";
-    measures = message ? [] : ([...new Set(requested)] as Measure[]);
+    metrics = message ? [] : ([...new Set(requested)] as Metric[]);
     const select = element<HTMLSelectElement>("metric");
     const previous = select.value;
     select.replaceChildren(
-      ...measures.map((key) => new Option(MEASURES[key], key)),
+      ...metrics.map((key) => new Option(METRICS[key], key)),
     );
-    if (measures.includes(previous as Measure)) select.value = previous;
+    if (metrics.includes(previous as Metric)) select.value = previous;
     setMessage("configuration-error", message);
     render();
     if (message) notify("repo-history-error", { message });
   }
 
-  function showDataset(incoming: Manifest) {
-    manifest = incoming;
+  function showDataset(incoming: HistorySummary) {
+    summary = incoming;
     reports = incoming.months;
     const first = reports[0]!.metadata.month;
     const last = reports.at(-1)!.metadata.month;
@@ -137,11 +137,11 @@ export function createViewer(
     end.value = String(months.length - 1);
     element("empty").hidden = true;
     element("dashboard").hidden = false;
-    element("repository-name").textContent = manifest!.display_name;
+    element("repository-name").textContent = summary!.display_name;
     const details = element("repository-details");
-    details.hidden = manifest!.repositories.length < 2;
+    details.hidden = summary!.repositories.length < 2;
     element("repository-list").replaceChildren(
-      ...manifest!.repositories.map((repo) => {
+      ...summary!.repositories.map((repo) => {
         const li = document.createElement("li"),
           link = document.createElement("a");
         link.textContent = repo.full_name;
@@ -171,22 +171,24 @@ export function createViewer(
     element<HTMLButtonElement>("load-url").disabled = false;
   }
 
-  async function load(action: (signal: AbortSignal) => Promise<Manifest>) {
+  async function load(
+    action: (signal: AbortSignal) => Promise<HistorySummary>,
+  ) {
     cancel();
     const current = generation;
     request = new AbortController();
     files.disabled = true;
     element<HTMLButtonElement>("load-url").disabled = true;
     setMessage("load-error", "");
-    setMessage("load-status", "Loading and validating manifest…");
+    setMessage("load-status", "Loading and validating summary…");
     try {
       const incoming = await action(request.signal);
       if (current !== generation) return;
       showDataset(incoming);
       setMessage("load-status", "");
       notify("repo-history-load", {
-        display_name: manifest!.display_name,
-        repositories: manifest!.repositories.map(
+        display_name: summary!.display_name,
+        repositories: summary!.repositories.map(
           ({ node_id, full_name, url }) => ({ node_id, full_name, url }),
         ),
         months: reports.map((report) => report.metadata.month),
@@ -194,13 +196,13 @@ export function createViewer(
     } catch (error) {
       if (current !== generation) return;
       const message =
-        error instanceof Error ? error.message : "Unable to load manifest.";
+        error instanceof Error ? error.message : "Unable to load summary.";
       setMessage("load-error", message);
       setMessage(
         "load-status",
         reports.length
           ? "The previous dataset is still available."
-          : "Unable to load manifest.",
+          : "Unable to load summary.",
       );
       notify("repo-history-error", { message });
       throw error;
@@ -215,22 +217,20 @@ export function createViewer(
   }
 
   function loadUrl(url: string) {
-    element<HTMLInputElement>("manifest").value = url;
-    return load((signal) =>
-      loadManifest(url, root.host.baseURI, fetch, signal),
-    );
+    element<HTMLInputElement>("summary").value = url;
+    return load((signal) => loadSummary(url, root.host.baseURI, fetch, signal));
   }
 
   files.addEventListener("change", () => {
     const selected = files.files?.[0];
     if (selected)
       void load(async () =>
-        parseManifest({ name: selected.name, text: await selected.text() }),
+        parseSummary({ name: selected.name, text: await selected.text() }),
       ).catch(() => {});
   });
-  element("manifest-form").addEventListener("submit", (event) => {
+  element("summary-form").addEventListener("submit", (event) => {
     event.preventDefault();
-    void loadUrl(element<HTMLInputElement>("manifest").value.trim()).catch(
+    void loadUrl(element<HTMLInputElement>("summary").value.trim()).catch(
       () => {},
     );
   });
@@ -244,9 +244,9 @@ export function createViewer(
   }
 
   function render() {
-    element("empty").hidden = !measures.length || reports.length > 0;
-    element("dashboard").hidden = !measures.length || !reports.length;
-    if (!measures.length || !reports.length) {
+    element("empty").hidden = !metrics.length || reports.length > 0;
+    element("dashboard").hidden = !metrics.length || !reports.length;
+    if (!metrics.length || !reports.length) {
       chart?.destroy();
       chart = undefined;
       plot = undefined;
@@ -260,7 +260,8 @@ export function createViewer(
     state.combined = element<HTMLInputElement>("combined").checked;
     const totalContributors = state.metric === "total-contributors";
     const balance = state.metric === "balance";
-    const contributors = state.metric === "contributors" || totalContributors;
+    const contributors =
+      state.metric === "contributors-by-type" || totalContributors;
     state.balanceTypes = checked<"issues" | "prs">("balance-type");
     const monthly = root.querySelector<HTMLInputElement>(
       'input[name="mode"][value="monthly"]',
@@ -277,11 +278,11 @@ export function createViewer(
     element("classification-legend").textContent = githubActivities
       ? "Activity actors"
       : "Contributor identities";
-    element("undetermined-label").textContent = githubActivities
-      ? "Undetermined"
-      : "Unresolved Git identities";
+    element("unknown-actors-label").textContent = githubActivities
+      ? "Unknown actors"
+      : "Unlinked Git identities";
     element("balance-types").hidden = !balance;
-    element("contribution-types").hidden =
+    element("activity-types").hidden =
       totalContributors || balance || state.metric === "commits";
     const commit = root.querySelector<HTMLInputElement>(
       'input[name="activity"][value="commit"]',
@@ -307,19 +308,19 @@ export function createViewer(
     selection.style.left = `${lastIndex ? (start.valueAsNumber / lastIndex) * 100 : 0}%`;
     selection.style.right = `${lastIndex ? 100 - (end.valueAsNumber / lastIndex) * 100 : 0}%`;
     start.style.zIndex = start.valueAsNumber === lastIndex ? "4" : "2";
-    const data = aggregate(manifest!, state);
+    const data = aggregate(summary!, state);
     plot = data;
     const cumulative = state.mode === "cumulative";
-    const measureLabel = {
+    const metricLabel = {
       activities: "activity",
       commits: "commits",
       "github-activities": "GitHub activity",
-      contributors: "contributors by type",
+      "contributors-by-type": "contributors by type",
       "total-contributors": "contributors",
       balance: "issue / PR balance",
     }[state.metric];
     element("chart-title").textContent =
-      `${cumulative ? "Cumulative" : "Monthly"} ${measureLabel}`;
+      `${cumulative ? "Cumulative" : "Monthly"} ${metricLabel}`;
     element("chart-subtitle").textContent = balance
       ? "OPENING AND CLOSING"
       : contributors
@@ -328,15 +329,15 @@ export function createViewer(
     element("chart-note").textContent = balance
       ? "Net change from zero at the selected start month, not the repository’s total open items. Issues: opened + reopened − closed. PRs: opened − merged; reports omit PR closes without merging and PR reopens. Negative values are possible."
       : totalContributors
-        ? `${cumulative ? "Unique credited identities across all contribution types since the selected start month." : "Unique credited identities active across all contribution types in each month."} This includes everyone from commits to comments. Each identity counts once, even when contributing in multiple types.`
+        ? `${cumulative ? "Unique credited identities across all activity types since the selected start month." : "Unique credited identities active across all activity types in each month."} This includes everyone from commits to comments. Each identity counts once, even when contributing in multiple types.`
         : contributors
-          ? `${cumulative ? "Unique credited identities since the selected start month." : "Side-by-side bars show unique credited identities per contribution type in each month."} Combined counts deduplicate across selected types.`
+          ? `${cumulative ? "Unique credited identities since the selected start month." : "Side-by-side bars show unique credited identities per activity type in each month."} Combined counts deduplicate across selected types.`
           : state.metric === "commits"
             ? `${cumulative ? "Running commit totals starting at the selected month." : "Recorded commits in each month."} Each commit counts once, including co-authored commits.`
             : `${cumulative ? "Running event totals starting at the selected month." : "Stacked bars show recorded events in each month across selected types."} GitHub activity excludes commits and follows the actor filters.`;
     element("no-series").textContent = balance
       ? "Select Issues, Pull requests, or both to draw a chart."
-      : "Select at least one contribution type to draw a chart.";
+      : "Select at least one activity type to draw a chart.";
     const warnings: string[] = [];
     if (data.missing.length)
       warnings.push(
@@ -347,11 +348,11 @@ export function createViewer(
         (report) => report.metadata.month === month,
       )!.source_reports;
       for (const { metadata } of sources.filter(
-        (source) => source.metadata.ongoing,
+        (source) => source.metadata.is_partial,
       )) {
         const through = metadata.coverage.as_of.slice(0, 10);
         const name =
-          manifest!.repositories.length > 1
+          summary!.repositories.length > 1
             ? `${metadata.repository.full_name}: `
             : "";
         warnings.push(
@@ -383,7 +384,7 @@ export function createViewer(
           .flatMap((report) =>
             report.source_reports.flatMap(({ metadata }) =>
               metadata.coverage.limitations.map((message) =>
-                manifest!.repositories.length > 1
+                summary!.repositories.length > 1
                   ? `${metadata.repository.full_name}: ${message}`
                   : message,
               ),
@@ -401,7 +402,7 @@ export function createViewer(
   }
 
   function download(url: string, extension: string) {
-    const repository = manifest!.display_name.replace(/[^a-zA-Z0-9_-]/g, "-");
+    const repository = summary!.display_name.replace(/[^a-zA-Z0-9_-]/g, "-");
     const link = document.createElement("a");
     link.download = `${repository}-${state.metric}-${state.mode}-${state.start}-to-${state.end}.${extension}`;
     link.href = url;
@@ -474,10 +475,10 @@ export function createViewer(
 
   return {
     loadUrl,
-    loadSource: (source: ManifestSource) =>
-      load(async () => parseManifest(source)),
+    loadSource: (source: HistorySummarySource) =>
+      load(async () => parseSummary(source)),
     cancel,
-    setMeasures,
+    setMetrics,
     disconnect() {
       cancel();
       chart?.destroy();

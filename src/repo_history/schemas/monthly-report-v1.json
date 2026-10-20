@@ -46,7 +46,7 @@
           "enum": [
             "human",
             "bot",
-            "unresolved_git"
+            "unlinked_git"
           ]
         },
         "github_node_id": {
@@ -788,7 +788,7 @@
       ],
       "additionalProperties": false
     },
-    "pr_conversation_comment_metadata": {
+    "pr_discussion_comment_metadata": {
       "type": "object",
       "properties": {
         "source_node_id": {
@@ -801,7 +801,7 @@
       ],
       "additionalProperties": false
     },
-    "pr_conversation_comment_activity": {
+    "pr_discussion_comment_activity": {
       "type": "object",
       "properties": {
         "id": {
@@ -809,7 +809,7 @@
           "minLength": 1
         },
         "type": {
-          "const": "pr_conversation_comment"
+          "const": "pr_discussion_comment"
         },
         "occurred_at": {
           "type": "string",
@@ -840,7 +840,7 @@
           "uniqueItems": true
         },
         "metadata": {
-          "$ref": "#/$defs/pr_conversation_comment_metadata"
+          "$ref": "#/$defs/pr_discussion_comment_metadata"
         }
       },
       "required": [
@@ -854,7 +854,7 @@
       ],
       "additionalProperties": false
     },
-    "pr_inline_review_comment_metadata": {
+    "pr_review_comment_metadata": {
       "type": "object",
       "properties": {
         "source_node_id": {
@@ -926,7 +926,7 @@
       ],
       "additionalProperties": false
     },
-    "pr_inline_review_comment_activity": {
+    "pr_review_comment_activity": {
       "type": "object",
       "properties": {
         "id": {
@@ -934,7 +934,7 @@
           "minLength": 1
         },
         "type": {
-          "const": "pr_inline_review_comment"
+          "const": "pr_review_comment"
         },
         "occurred_at": {
           "type": "string",
@@ -965,7 +965,7 @@
           "uniqueItems": true
         },
         "metadata": {
-          "$ref": "#/$defs/pr_inline_review_comment_metadata"
+          "$ref": "#/$defs/pr_review_comment_metadata"
         }
       },
       "required": [
@@ -1086,10 +1086,10 @@
           "$ref": "#/$defs/issue_comment_activity"
         },
         {
-          "$ref": "#/$defs/pr_conversation_comment_activity"
+          "$ref": "#/$defs/pr_discussion_comment_activity"
         },
         {
-          "$ref": "#/$defs/pr_inline_review_comment_activity"
+          "$ref": "#/$defs/pr_review_comment_activity"
         },
         {
           "$ref": "#/$defs/pr_review_activity"

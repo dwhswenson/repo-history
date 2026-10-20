@@ -11,19 +11,21 @@ from repo_history import (
     ACTIVITY_TYPES,
     ReportValidationError,
     ReportWriteError,
-    manifest,
+)
+from repo_history import (
+    summary as summary_module,
 )
 from repo_history.cli import main
 
 FIXTURES = Path(__file__).parent / "fixtures"
-BASE = json.loads((FIXTURES / "viz-manifest-v1.json").read_text())
+BASE = json.loads((FIXTURES / "viz-summary-v1.json").read_text())
 GIT = next(key for key in BASE["actors"] if key.startswith("git:email:"))
 ACTORS = {
     "U_shared": "human",
     "U_returning": "human",
     "U_new": "human",
     "B_bot": "bot",
-    GIT: "unresolved_git",
+    GIT: "unlinked_git",
 }
 
 
@@ -42,7 +44,7 @@ def summary(participation, *, commits=None, missing_comments=0, actors=ACTORS):
             "total": len(keys),
             **{
                 group: sum(actors[key] == group for key in keys)
-                for group in ("human", "bot", "unresolved_git")
+                for group in ("human", "bot", "unlinked_git")
             },
         }
 
@@ -62,7 +64,7 @@ def summary(participation, *, commits=None, missing_comments=0, actors=ACTORS):
     }
 
 
-def single_manifest(repo, summaries, *, partial=(), actors=ACTORS):
+def single_summary(repo, summaries, *, partial=(), actors=ACTORS):
     from repo_history.contracts import month_bounds
     from repo_history.serialization import to_data
 
@@ -75,13 +77,13 @@ def single_manifest(repo, summaries, *, partial=(), actors=ACTORS):
     months, used = [], set()
     for month, values in summaries.items():
         start, end = (to_data(date) for date in month_bounds(month))
-        ongoing = month in partial
-        observed = start if ongoing else end
+        is_partial = month in partial
+        observed = start if is_partial else end
         calendar = {
             "month": month,
             "month_start": start,
             "month_end": end,
-            "ongoing": ongoing,
+            "is_partial": is_partial,
         }
         meta = deepcopy(BASE["months"][0]["source_reports"][0]["metadata"])
         meta.update(calendar, repository=repository)
@@ -115,13 +117,13 @@ def single_manifest(repo, summaries, *, partial=(), actors=ACTORS):
         "actors": {key: actors[key] for key in sorted(used)},
         "months": months,
     }
-    manifest.validate_manifest(data)
+    summary_module.validate_summary(data)
     return data
 
 
 def example_inputs():
     return [
-        single_manifest(
+        single_summary(
             "R_a",
             {
                 "2024-02": summary(
@@ -139,7 +141,7 @@ def example_inputs():
                 "2024-04": summary({}),
             },
         ),
-        single_manifest(
+        single_summary(
             "R_b",
             {
                 "2024-02": summary(
@@ -159,7 +161,7 @@ def example_inputs():
 def save_inputs(directory, data):
     paths = []
     for i, value in enumerate(data):
-        path = directory / f"repo-{i}" / "manifest.json"
+        path = directory / f"repo-{i}" / "summary.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(value))
         paths.append(path)
@@ -168,7 +170,7 @@ def save_inputs(directory, data):
 
 def command(paths, target, *options):
     return [
-        "combine-manifests",
+        "combine",
         *map(str, paths),
         "-o",
         str(target),
@@ -197,13 +199,13 @@ def test_combines_offline_deterministically_and_matches_shared_fixture(
     monthly = protected.with_name("2024-02.json")
     monthly.write_text("monthly report")
     monkeypatch.chdir(tmp_path)
-    target = Path("public/manifest.json")
+    target = Path("public/summary.json")
     args = command([Path("repo-0"), paths[1]], target)
     args[args.index("-o")] = "--output"
     assert main(args) == 0
     assert capsys.readouterr() == (str(target) + "\n", "")
     data = json.loads(target.read_text())
-    assert data == json.loads((FIXTURES / "combined-manifest-v1.json").read_text())
+    assert data == json.loads((FIXTURES / "combined-summary-v1.json").read_text())
     assert [m["summaries"]["repository_counts"]["commit"] for m in data["months"]] == [
         2,
         2,
@@ -237,18 +239,20 @@ def test_combines_offline_deterministically_and_matches_shared_fixture(
 
 def test_three_inputs_and_precombined_inputs(tmp_path):
     paths = save_inputs(tmp_path, example_inputs())
-    third = single_manifest(
+    third = single_summary(
         "R_c", {m: summary({}) for m in ("2024-02", "2024-03", "2024-04")}
     )
     third_path = tmp_path / "third.json"
     third_path.write_text(json.dumps(third))
     combined = tmp_path / "combined.json"
-    manifest._combine_manifests(paths, output_path=combined, display_name="First two")
+    summary_module._combine_summaries(
+        paths, output_path=combined, display_name="First two"
+    )
     direct, nested = (tmp_path / name for name in ("direct.json", "nested.json"))
-    manifest._combine_manifests(
+    summary_module._combine_summaries(
         [*paths, third_path], output_path=direct, display_name="Three"
     )
-    manifest._combine_manifests(
+    summary_module._combine_summaries(
         [third_path, combined], output_path=nested, display_name="Three"
     )
     assert direct.read_bytes() == nested.read_bytes()
@@ -260,7 +264,7 @@ def test_partial_policy_and_verbosity(tmp_path, capsys, options):
     last = inputs[0]["months"][-1]
     partial_only = "U_partial"
     actors = {**ACTORS, partial_only: "human"}
-    inputs[0] = single_manifest(
+    inputs[0] = single_summary(
         "R_a",
         {
             **{
@@ -283,7 +287,7 @@ def test_partial_policy_and_verbosity(tmp_path, capsys, options):
     else:
         assert "Excluding partial month 2024-04" in err and "example/R_a" in err
         assert "--include-partial" in err
-        assert ("Reading and validating manifest" in err) == ("--verbose" in options)
+        assert ("Reading and validating summary" in err) == ("--verbose" in options)
     data = json.loads(target.read_text())
     assert [m["metadata"]["month"] for m in data["months"]] == ["2024-02", "2024-03"]
     assert partial_only not in data["actors"]
@@ -292,7 +296,7 @@ def test_partial_policy_and_verbosity(tmp_path, capsys, options):
     out, err = capsys.readouterr()
     assert "Excluding" not in err
     included = json.loads(target.read_text())
-    assert included["months"][-1]["metadata"]["ongoing"] is True
+    assert included["months"][-1]["metadata"]["is_partial"] is True
     assert (
         included["months"][-1]["source_reports"][0]
         == inputs[0]["months"][-1]["source_reports"][0]
@@ -305,7 +309,7 @@ def test_partial_exclusions_and_contiguity(tmp_path, capsys, problem):
     months = ["2024-02"] if problem == "empty" else ["2024-02", "2024-03", "2024-04"]
     partial = "2024-03" if problem == "internal" else "2024-02"
     inputs = [
-        single_manifest(
+        single_summary(
             repo,
             {m: summary({}) for m in months},
             partial=[partial] if repo == "R_a" else [],
@@ -354,7 +358,7 @@ def test_rejects_repository_overlap(tmp_path, capsys, problem):
         b_path = tmp_path / "b.json"
         b_path.write_text(json.dumps(b))
         combined = tmp_path / "combined.json"
-        manifest._combine_manifests(
+        summary_module._combine_summaries(
             [paths[0], b_path], output_path=combined, display_name="Both"
         )
         paths[1] = combined
@@ -376,8 +380,8 @@ def test_actor_conflicts_checked_before_exclusion(tmp_path, capsys, partial_only
     }
     partial = ["2024-03"] if partial_only else []
     inputs = [
-        single_manifest("R_a", counts, partial=partial),
-        single_manifest("R_b", other_counts, partial=partial, actors=other_actors),
+        single_summary("R_a", counts, partial=partial),
+        single_summary("R_b", other_counts, partial=partial, actors=other_actors),
     ]
     paths = save_inputs(tmp_path, inputs)
     target = tmp_path / "out.json"
@@ -400,7 +404,7 @@ def test_rejects_missing_coverage(tmp_path, capsys, problem):
     if problem == "all-missing":
         months_a.remove(missing)
     inputs = [
-        single_manifest(repo, {m: summary({}) for m in months})
+        single_summary(repo, {m: summary({}) for m in months})
         for repo, months in (("R_a", months_a), ("R_b", months_b))
     ]
     paths = save_inputs(tmp_path, inputs)
@@ -418,8 +422,8 @@ def test_rejects_missing_coverage(tmp_path, capsys, problem):
 
 
 def test_pre_history_requires_evidence_and_retains_zero_months(tmp_path, capsys):
-    a = single_manifest("R_a", {m: summary({}) for m in ("2024-02", "2024-03")})
-    b = single_manifest("R_b", {"2024-03": summary({})})
+    a = single_summary("R_a", {m: summary({}) for m in ("2024-02", "2024-03")})
+    b = single_summary("R_b", {"2024-03": summary({})})
     repo = b["repositories"][0]
     proof = deepcopy(
         b["months"][0]["source_reports"][0]["metadata"]["provenance"]["created_by"]
@@ -463,7 +467,7 @@ def test_pre_history_requires_evidence_and_retains_zero_months(tmp_path, capsys)
 def test_argument_errors(tmp_path, monkeypatch, options):
     monkeypatch.chdir(tmp_path)
     with pytest.raises(SystemExit) as exc:
-        main(["combine-manifests", *options])
+        main(["combine", *options])
     assert exc.value.code == 2
     assert not (tmp_path / "out.json").exists()
 
@@ -495,7 +499,7 @@ def test_invalid_inputs_preserve_output(tmp_path, capsys, problem):
             data["schema_version"] = "2"
         else:
             if problem == "partial-summary":
-                data = single_manifest(
+                data = single_summary(
                     "R_b", {"2024-02": summary({})}, partial=["2024-02"]
                 )
             data["months"][0]["summaries"]["repository_counts"]["commit"] += 1
@@ -506,7 +510,7 @@ def test_invalid_inputs_preserve_output(tmp_path, capsys, problem):
     out, err = capsys.readouterr()
     assert out == "" and str(paths[1]) in err and "Traceback" not in err
     assert target.read_bytes() == b"previous output"
-    assert not list(tmp_path.glob(".manifest.*.tmp"))
+    assert not list(tmp_path.glob(".summary.*.tmp"))
 
 
 @pytest.mark.parametrize("problem", ["overflow", "run-conflict"])
@@ -515,7 +519,7 @@ def test_rejects_inconsistency_only_visible_after_combination(
 ):
     if problem == "overflow":
         inputs = [
-            single_manifest(
+            single_summary(
                 repo, {"2024-02": summary({"U_shared": {"commit": 9007199254740991}})}
             )
             for repo in ("R_a", "R_b")
@@ -530,14 +534,14 @@ def test_rejects_inconsistency_only_visible_after_combination(
         message = "conflicting descriptors for run ID"
     paths = save_inputs(tmp_path, inputs)
     for path in paths:
-        manifest.validate_manifest(json.loads(path.read_text()))
+        summary_module.validate_summary(json.loads(path.read_text()))
     target = tmp_path / "out.json"
     target.write_bytes(b"previous output")
     assert main(command(paths, target)) == 1
     out, err = capsys.readouterr()
     assert out == "" and message in err
     assert target.read_bytes() == b"previous output"
-    assert not list(tmp_path.glob(".manifest.*.tmp"))
+    assert not list(tmp_path.glob(".summary.*.tmp"))
 
 
 @pytest.mark.parametrize(
@@ -553,7 +557,7 @@ def test_output_protection(tmp_path, capsys, alias):
     elif alias == "symlink-parent":
         link = tmp_path / "linked-dir"
         link.symlink_to(paths[0].parent, target_is_directory=True)
-        target = link / "manifest.json"
+        target = link / "summary.json"
     elif alias == "hardlink":
         target.hardlink_to(paths[0])
     elif alias == "monthly":
@@ -569,7 +573,7 @@ def test_output_protection(tmp_path, capsys, alias):
     assert all(path.read_bytes() == content for path, content in original.items())
     if old_target is not None:
         assert target.read_bytes() == old_target
-    assert not list(tmp_path.glob(".manifest.*.tmp"))
+    assert not list(tmp_path.glob(".summary.*.tmp"))
 
 
 @pytest.mark.parametrize(
@@ -584,7 +588,7 @@ def test_atomic_failures_preserve_inputs_and_output(
     target = tmp_path / "out.json"
     target.write_bytes(b"previous output")
     if stage.endswith("validation"):
-        validate = manifest.validate_manifest
+        validate = summary_module.validate_summary
         calls = 0
 
         def fail(data):
@@ -594,15 +598,15 @@ def test_atomic_failures_preserve_inputs_and_output(
                 raise ReportValidationError("$", "validation failed")
             validate(data)
 
-        monkeypatch.setattr(manifest, "validate_manifest", fail)
+        monkeypatch.setattr(summary_module, "validate_summary", fail)
     elif stage == "replace":
 
         def fail(*args):
             raise OSError("replace failed")
 
-        monkeypatch.setattr(manifest.os, "replace", fail)
+        monkeypatch.setattr(summary_module.os, "replace", fail)
     else:
-        factory = manifest.tempfile.NamedTemporaryFile
+        factory = summary_module.tempfile.NamedTemporaryFile
 
         class BrokenWriter:
             def __init__(self, *args, **kwargs):
@@ -623,21 +627,21 @@ def test_atomic_failures_preserve_inputs_and_output(
             def flush(self):
                 raise OSError("flush failed")
 
-        monkeypatch.setattr(manifest.tempfile, "NamedTemporaryFile", BrokenWriter)
+        monkeypatch.setattr(summary_module.tempfile, "NamedTemporaryFile", BrokenWriter)
     assert main(command(paths, target)) == 1
     out, err = capsys.readouterr()
     assert out == "" and "failed" in err and "Traceback" not in err
     assert target.read_bytes() == b"previous output"
     assert all(path.read_bytes() == content for path, content in originals.items())
-    assert not list(tmp_path.glob(".manifest.*.tmp"))
+    assert not list(tmp_path.glob(".summary.*.tmp"))
 
 
 def test_helper_rejects_invalid_requests(tmp_path):
     with pytest.raises(ReportWriteError, match="at least two"):
-        manifest._combine_manifests(
+        summary_module._combine_summaries(
             [], output_path=tmp_path / "out.json", display_name="Title"
         )
     with pytest.raises(ReportWriteError, match="must not be blank"):
-        manifest._combine_manifests(
+        summary_module._combine_summaries(
             ["a", "b"], output_path=tmp_path / "out.json", display_name=" "
         )

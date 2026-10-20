@@ -1,4 +1,4 @@
-"""Backfill timing accounts for work, cleanup, failures, and CLI overhead."""
+"""Collect timing accounts for work, cleanup, failures, and CLI overhead."""
 
 import builtins
 import importlib
@@ -11,7 +11,7 @@ from repo_history import _terminal, _timing, cli, history, state, writing
 from .test_history import NOW
 from .test_history import session as session
 
-backfill = importlib.import_module("repo_history.backfill")
+collect = importlib.import_module("repo_history.collect")
 
 
 @pytest.mark.parametrize(
@@ -23,7 +23,7 @@ def test_phase_durations_reconcile_with_cli_runtime(
     monkeypatch.setenv("GH_TOKEN", "test")
     monkeypatch.setattr(cli, "_utc_now", lambda: NOW)
     clock = [0.0]
-    for module in (backfill, history, cli, _timing):
+    for module in (collect, history, cli, _timing):
         monkeypatch.setattr(module, "perf_counter", lambda: clock[0])
 
     def delay(module, name, seconds, *, fail=False):
@@ -38,14 +38,14 @@ def test_phase_durations_reconcile_with_cli_runtime(
         monkeypatch.setattr(module, name, run)
 
     delay(cli, "_parser", 19)
-    delay(_terminal.BackfillProgress, "__exit__", 23)
-    delay(backfill, "_check_directory", 2, fail=failure == "preparation")
+    delay(_terminal.CollectProgress, "__exit__", 23)
+    delay(collect, "_check_directory", 2, fail=failure == "preparation")
     delay(history, "GraphQLClient", 3, fail=failure == "authentication")
     delay(history, "lookup_repository", 29, fail=failure == "collection")
     delay(session, "close", 4)
     delay(writing, "directory_repository", 5)
-    delay(backfill, "history_to_months", 7, fail=failure == "monthly")
-    delay(backfill, "_write_report", 11)
+    delay(collect, "history_to_months", 7, fail=failure == "monthly")
+    delay(collect, "_write_report", 11)
     delay(state, "write_collection_state", 17, fail=failure == "state")
 
     def saved(*args, **kwargs):
@@ -55,7 +55,7 @@ def test_phase_durations_reconcile_with_cli_runtime(
     monkeypatch.setattr(cli, "print", saved, raising=False)
     assert cli.main(
         [
-            "backfill",
+            "collect",
             "o/r",
             "--start",
             "2024-01",
@@ -67,13 +67,13 @@ def test_phase_durations_reconcile_with_cli_runtime(
     ) == (1 if failure else 0)
     output = capsys.readouterr().err
     phases = re.findall(
-        r"INFO: (Backfill preparation|History collection|History grouping/writing monthly|"
+        r"INFO: (Collect preparation|History collection|History grouping/writing monthly|"
         r"History inventory/verification) status=(\w+) elapsed_seconds=([\d.]+)",
         output,
     )
-    expected = [("Backfill preparation", "completed", "2.000")]
+    expected = [("Collect preparation", "completed", "2.000")]
     if failure == "preparation":
-        expected[-1] = ("Backfill preparation", "failed", "2.000")
+        expected[-1] = ("Collect preparation", "failed", "2.000")
     elif failure == "authentication":
         expected.append(("History collection", "failed", "3.000"))
     else:
@@ -102,7 +102,7 @@ def test_phase_durations_reconcile_with_cli_runtime(
                 )
     assert phases == expected
     summaries = re.findall(
-        r"Backfill summary status=(\w+) total_elapsed_seconds=([\d.]+) "
+        r"Collect summary status=(\w+) total_elapsed_seconds=([\d.]+) "
         r"phase_elapsed_seconds=([\d.]+) unaccounted_seconds=([\d.]+)",
         output,
     )

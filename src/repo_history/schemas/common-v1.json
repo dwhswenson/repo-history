@@ -11,7 +11,7 @@
         },
         "command": {
           "enum": [
-            "backfill",
+            "collect",
             "update",
             "collect_history",
             "collect_month",
@@ -207,8 +207,9 @@
           "format": "date-time",
           "pattern": "Z$"
         },
-        "ongoing": {
-          "type": "boolean"
+        "is_partial": {
+          "type": "boolean",
+          "description": "True when coverage.as_of precedes month_end; a snapshot through collection time, not a collection failure."
         },
         "provenance": {
           "type": "object",
@@ -282,7 +283,7 @@
         "month",
         "month_start",
         "month_end",
-        "ongoing",
+        "is_partial",
         "provenance",
         "coverage",
         "default_branch",
@@ -307,15 +308,16 @@
           "format": "date-time",
           "pattern": "Z$"
         },
-        "ongoing": {
-          "type": "boolean"
+        "is_partial": {
+          "type": "boolean",
+          "description": "True when any included source report has partial month coverage."
         }
       },
       "required": [
         "month",
         "month_start",
         "month_end",
-        "ongoing"
+        "is_partial"
       ],
       "additionalProperties": false
     },
@@ -357,12 +359,12 @@
           "minimum": 0,
           "maximum": 9007199254740991
         },
-        "pr_conversation_comment": {
+        "pr_discussion_comment": {
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
         },
-        "pr_inline_review_comment": {
+        "pr_review_comment": {
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
@@ -381,8 +383,8 @@
         "issue_closed",
         "issue_reopened",
         "issue_comment",
-        "pr_conversation_comment",
-        "pr_inline_review_comment",
+        "pr_discussion_comment",
+        "pr_review_comment",
         "pr_review"
       ],
       "additionalProperties": false
@@ -405,7 +407,7 @@
           "minimum": 0,
           "maximum": 9007199254740991
         },
-        "unresolved_git": {
+        "unlinked_git": {
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
@@ -415,7 +417,7 @@
         "total",
         "human",
         "bot",
-        "unresolved_git"
+        "unlinked_git"
       ],
       "additionalProperties": false
     },
@@ -462,10 +464,10 @@
             "issue_comment": {
               "$ref": "urn:repo-history-tracking:common:1#/$defs/population"
             },
-            "pr_conversation_comment": {
+            "pr_discussion_comment": {
               "$ref": "urn:repo-history-tracking:common:1#/$defs/population"
             },
-            "pr_inline_review_comment": {
+            "pr_review_comment": {
               "$ref": "urn:repo-history-tracking:common:1#/$defs/population"
             },
             "pr_review": {
@@ -480,8 +482,8 @@
             "issue_closed",
             "issue_reopened",
             "issue_comment",
-            "pr_conversation_comment",
-            "pr_inline_review_comment",
+            "pr_discussion_comment",
+            "pr_review_comment",
             "pr_review"
           ],
           "additionalProperties": false

@@ -14,10 +14,10 @@ from .models import (
     IssueCommentMetadata,
     IssueOpenedMetadata,
     IssueReopenedMetadata,
-    PRConversationCommentMetadata,
-    PRInlineReviewCommentMetadata,
+    PRDiscussionCommentMetadata,
     PRMergedMetadata,
     PROpenedMetadata,
+    PRReviewCommentMetadata,
     PRReviewMetadata,
     Subject,
 )
@@ -320,8 +320,8 @@ def _add_authored(
 def _collect_comments(client, subject, author, start, end, records, *, issues, initial):
     operation = "IssueComments" if issues else "PullRequestComments"
     query = ISSUE_COMMENTS_QUERY if issues else PR_COMMENTS_QUERY
-    kind = "issue_comment" if issues else "pr_conversation_comment"
-    metadata = IssueCommentMetadata if issues else PRConversationCommentMetadata
+    kind = "issue_comment" if issues else "pr_discussion_comment"
+    metadata = IssueCommentMetadata if issues else PRDiscussionCommentMetadata
     for value in _nodes(
         client, query, operation, subject.node_id, "comments", initial=initial
     ):
@@ -449,7 +449,7 @@ def _collect_inline_comments(
             if review is None
             else _string(_object(review, operation), "id", operation)
         )
-        details = PRInlineReviewCommentMetadata(
+        details = PRReviewCommentMetadata(
             source_id,
             review_id,
             thread_id,
@@ -466,7 +466,7 @@ def _collect_inline_comments(
             subject,
             author,
             published or created,
-            "pr_inline_review_comment",
+            "pr_review_comment",
             details,
             start,
             end,

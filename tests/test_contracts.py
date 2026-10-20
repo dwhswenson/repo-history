@@ -10,7 +10,6 @@ import pytest
 
 import repo_history as api
 from repo_history.contracts import contract_validator
-from repo_history.manifest import _sum_summaries, validate_manifest
 from repo_history.provenance import make_run
 from repo_history.serialization import to_data
 from repo_history.state import (
@@ -18,6 +17,7 @@ from repo_history.state import (
     verify_collection_state,
     write_collection_state,
 )
+from repo_history.summary import _sum_summaries, validate_summary
 
 from .test_history import NOW
 from .test_history import session as session
@@ -27,8 +27,8 @@ def read_state(directory):
     return json.loads((directory / STATE_FILE).read_text())
 
 
-def test_full_backfill_establishes_boundary_and_baseline(session, tmp_path):
-    paths = api.backfill("o", "r", output_directory=tmp_path, token="test")
+def test_full_collect_establishes_boundary_and_baseline(session, tmp_path):
+    paths = api.collect("o", "r", output_directory=tmp_path, token="test")
     reports = [api.report_from_json(p.read_text()) for p in paths]
     state = read_state(tmp_path)
     api.validate_collection_state(state)
@@ -39,26 +39,26 @@ def test_full_backfill_establishes_boundary_and_baseline(session, tmp_path):
     assert reports[0].metadata.repository.history_start_month == "2023-12"
     assert reports[0].metadata.repository.created_at.strftime("%Y-%m") == "2024-01"
     assert len({r.metadata.provenance.created_by.run_id for r in reports}) == 1
-    assert reports[-1].metadata.ongoing
+    assert reports[-1].metadata.is_partial
     assert reports[-1].summaries.repository_counts == dict.fromkeys(
         api.ACTIVITY_TYPES, 0
     )
     run = reports[0].metadata.provenance.created_by
-    assert run.command == "backfill" and run.requested_start_month is None
+    assert run.command == "collect" and run.requested_start_month is None
     assert run.collection_since is run.collection_until is None
-    # No network access is needed to generate or validate the new manifest.
+    # No network access is needed to generate or validate the new summary.
     count = len(session.calls)
-    manifest = api.build_manifest(reports, display_name="Selected projects")
-    validate_manifest(manifest)
-    assert manifest["display_name"] == "Selected projects"
+    summary = api.build_summary(reports, display_name="Selected projects")
+    validate_summary(summary)
+    assert summary["display_name"] == "Selected projects"
     assert len(session.calls) == count
 
 
 @pytest.mark.parametrize("start,end", [("2024-02", "2024-03"), (None, "2024-03")])
-def test_partial_backfill_stores_evidence_but_no_checkpoint(
+def test_partial_collect_stores_evidence_but_no_checkpoint(
     session, tmp_path, start, end
 ):
-    paths = api.backfill("o", "r", start, end, output_directory=tmp_path, token="test")
+    paths = api.collect("o", "r", start, end, output_directory=tmp_path, token="test")
     report = api.report_from_json(paths[0].read_text())
     assert report.metadata.repository.history_start_month == "2023-12"
     assert report.metadata.provenance.created_by.requested_start_month == start
@@ -68,7 +68,7 @@ def test_partial_backfill_stores_evidence_but_no_checkpoint(
 
 @pytest.mark.parametrize("change", ["changed", "missing", "extra"])
 def test_state_inventory_detects_tampering(session, tmp_path, change):
-    paths = api.backfill("o", "r", output_directory=tmp_path, token="test")
+    paths = api.collect("o", "r", output_directory=tmp_path, token="test")
     state = read_state(tmp_path)
     if change == "changed":
         paths[0].write_text(paths[0].read_text() + "\n")
@@ -88,11 +88,9 @@ def test_state_inventory_detects_tampering(session, tmp_path, change):
 
 
 def test_rebuild_preserves_creator_and_changes_latest_run(session, tmp_path):
-    paths = api.backfill("o", "r", output_directory=tmp_path, token="test")
+    paths = api.collect("o", "r", output_directory=tmp_path, token="test")
     before = api.report_from_json(paths[0].read_text())
-    api.backfill(
-        "o", "r", "2023-12", "2023-12", output_directory=tmp_path, token="test"
-    )
+    api.collect("o", "r", "2023-12", "2023-12", output_directory=tmp_path, token="test")
     after = api.report_from_json(paths[0].read_text())
     assert after.metadata.provenance.created_by == before.metadata.provenance.created_by
     assert (
@@ -107,7 +105,7 @@ def test_rebuild_preserves_creator_and_changes_latest_run(session, tmp_path):
 
 
 def test_old_month_write_invalidates_checkpoint_and_retains_boundary(session, tmp_path):
-    paths = api.backfill("o", "r", output_directory=tmp_path, token="test")
+    paths = api.collect("o", "r", output_directory=tmp_path, token="test")
     before = api.report_from_json(paths[1].read_text())
     updated = make_run(
         "update",
@@ -140,7 +138,7 @@ def test_old_month_write_invalidates_checkpoint_and_retains_boundary(session, tm
 def test_failure_does_not_advance_state(session, tmp_path, monkeypatch):
     import repo_history.state as module
 
-    paths = api.backfill("o", "r", output_directory=tmp_path, token="test")
+    paths = api.collect("o", "r", output_directory=tmp_path, token="test")
     original = (tmp_path / STATE_FILE).read_bytes()
     actual = module.os.replace
 
@@ -151,7 +149,7 @@ def test_failure_does_not_advance_state(session, tmp_path, monkeypatch):
 
     monkeypatch.setattr(module.os, "replace", fail)
     with pytest.raises(OSError, match="state write failed"):
-        api.backfill("o", "r", output_directory=tmp_path, token="test")
+        api.collect("o", "r", output_directory=tmp_path, token="test")
     assert (tmp_path / STATE_FILE).read_bytes() == original
     with pytest.raises(api.ReportValidationError, match="inventory"):
         verify_collection_state(json.loads(original), tmp_path)
@@ -165,7 +163,7 @@ def test_final_verification_rejects_corrupt_state_before_publish(
 ):
     import repo_history.state as module
 
-    api.backfill("o", "r", output_directory=tmp_path, token="test")
+    api.collect("o", "r", output_directory=tmp_path, token="test")
     original = (tmp_path / STATE_FILE).read_bytes()
     dumps = module.json.dumps
 
@@ -180,7 +178,7 @@ def test_final_verification_rejects_corrupt_state_before_publish(
 
     monkeypatch.setattr(module.json, "dumps", corrupt_state)
     with pytest.raises(api.ReportValidationError):
-        api.backfill("o", "r", output_directory=tmp_path, token="test")
+        api.collect("o", "r", output_directory=tmp_path, token="test")
     assert (tmp_path / STATE_FILE).read_bytes() == original
     assert not list(tmp_path.glob("*.tmp"))
 
@@ -188,7 +186,7 @@ def test_final_verification_rejects_corrupt_state_before_publish(
 def test_unmaterialized_future_activity_prevents_baseline(session, tmp_path):
     snapshot = api.collect_history("o", "r", token="test")
     run = make_run(
-        "backfill",
+        "collect",
         snapshot.collection_started_at,
         snapshot.collection_finished_at,
         parents="full",
@@ -203,17 +201,15 @@ def test_unmaterialized_future_activity_prevents_baseline(session, tmp_path):
 
 
 def test_deleted_first_report_cannot_erase_history_evidence(session, tmp_path):
-    paths = api.backfill("o", "r", output_directory=tmp_path, token="test")
+    paths = api.collect("o", "r", output_directory=tmp_path, token="test")
     paths[0].unlink()
-    manifest = api.build_manifest(
-        api.report_from_json(p.read_text()) for p in paths[1:]
-    )
-    assert manifest["repositories"][0]["history_start_month"] == "2023-12"
+    summary = api.build_summary(api.report_from_json(p.read_text()) for p in paths[1:])
+    assert summary["repositories"][0]["history_start_month"] == "2023-12"
 
 
-def multi_manifest(mixed):
+def multi_summary(mixed):
     """A prepared aggregate fixture, not an exposed combining implementation."""
-    value = api.build_manifest([mixed], display_name="Two repositories")
+    value = api.build_summary([mixed], display_name="Two repositories")
     second = copy.deepcopy(value["months"][0]["source_reports"][0])
     second["metadata"]["repository"]["node_id"] = "R_second"
     second["metadata"]["repository"]["full_name"] = "another/project"
@@ -227,8 +223,8 @@ def multi_manifest(mixed):
 
 
 def test_multi_repository_contract_sums_events_and_unions_people(mixed):
-    value = multi_manifest(mixed)
-    validate_manifest(value)
+    value = multi_summary(mixed)
+    validate_summary(value)
     summary = value["months"][0]["summaries"]
     assert (
         summary["repository_counts"]["commit"]
@@ -239,10 +235,10 @@ def test_multi_repository_contract_sums_events_and_unions_people(mixed):
 
 @pytest.mark.parametrize(
     "problem",
-    ["aggregate", "duplicate", "unknown", "missing", "creation", "run", "ongoing"],
+    ["aggregate", "duplicate", "unknown", "missing", "creation", "run", "is_partial"],
 )
 def test_invalid_multi_repository_contracts(mixed, problem):
-    value = multi_manifest(mixed)
+    value = multi_summary(mixed)
     month = value["months"][0]
     if problem == "aggregate":
         month["summaries"]["repository_counts"]["commit"] += 1
@@ -261,13 +257,13 @@ def test_invalid_multi_repository_contracts(mixed, problem):
             "collector_version"
         ] = "conflict"
     else:
-        month["metadata"]["ongoing"] = True
+        month["metadata"]["is_partial"] = True
     with pytest.raises(api.ReportValidationError):
-        validate_manifest(value)
+        validate_summary(value)
 
 
 def test_multi_repository_pre_history_zero_requires_evidence(mixed):
-    value = api.build_manifest([mixed])
+    value = api.build_summary([mixed])
     run = copy.deepcopy(
         value["months"][0]["source_reports"][0]["metadata"]["provenance"]["created_by"]
     )
@@ -288,12 +284,12 @@ def test_multi_repository_pre_history_zero_requires_evidence(mixed):
             "history_start_established_by": run,
         }
     )
-    validate_manifest(value)
+    validate_summary(value)
     value["repositories"][1].update(
         history_start_month=None, history_start_established_by=None
     )
     with pytest.raises(api.ReportValidationError, match="missing report"):
-        validate_manifest(value)
+        validate_summary(value)
 
 
 def test_new_contract_rejects_old_metadata(mixed):
@@ -301,7 +297,7 @@ def test_new_contract_rejects_old_metadata(mixed):
     value["metadata"]["collection_started_at"] = value["metadata"]["coverage"]["as_of"]
     with pytest.raises(api.ReportValidationError):
         api.report_from_json(json.dumps(value))
-    for name in ("monthly-report", "viz-manifest", "collection-state"):
+    for name in ("monthly-report", "viz-summary", "collection-state"):
         assert contract_validator(name).schema["properties"]["schema_version"] == {
             "const": "1"
         }
@@ -321,7 +317,7 @@ def test_incremental_provenance_keeps_rebuild_and_closes_month(mixed):
         mixed.metadata,
         provenance=replace(p, last_updated_by=run),
         coverage=api.Coverage(NOW),
-        ongoing=False,
+        is_partial=False,
     )
     assert (
         api.report_from_json(
@@ -333,15 +329,15 @@ def test_incremental_provenance_keeps_rebuild_and_closes_month(mixed):
 
 def test_shared_contract_examples(mixed):
     fixtures = Path(__file__).parent / "fixtures"
-    multi = json.loads((fixtures / "multi-repo-manifest-v1.json").read_text())
-    assert multi == multi_manifest(mixed)
-    validate_manifest(multi)
+    multi = json.loads((fixtures / "multi-repo-summary-v1.json").read_text())
+    assert multi == multi_summary(mixed)
+    validate_summary(multi)
     state = json.loads((fixtures / "collection-state-v1.json").read_text())
     api.validate_collection_state(state)
 
 
 def test_state_contract_accepts_future_incremental_progress(session, tmp_path):
-    api.backfill("o", "r", output_directory=tmp_path, token="test")
+    api.collect("o", "r", output_directory=tmp_path, token="test")
     state = read_state(tmp_path)
     applied = copy.deepcopy(state["last_applied_run"])
     applied.update(
@@ -372,7 +368,7 @@ def test_inactive_repository_baseline_uses_creation_month(session, tmp_path):
     )
     session.add("RepositoryIssues", "R_example", connection("issues"))
     session.add("RepositoryPullRequests", "R_example", connection("pullRequests"))
-    paths = api.backfill("o", "r", output_directory=tmp_path, token="test")
+    paths = api.collect("o", "r", output_directory=tmp_path, token="test")
     assert [p.stem for p in paths] == ["2024-03", "2024-04"]
     state = read_state(tmp_path)
     assert state["repository"]["history_start_month"] == "2024-03"

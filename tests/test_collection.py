@@ -242,12 +242,12 @@ def test_month_boundaries_and_offset_timestamps(session, year, month, end):
     )
 
 
-def test_ongoing_is_fixed_at_collection_start(session, monkeypatch):
+def test_is_partial_is_fixed_at_collection_start(session, monkeypatch):
     times = iter([datetime(2024, 2, 29, 23, 59, tzinfo=timezone.utc), NOW])
     monkeypatch.setattr(history, "_utc_now", lambda: next(times))
     source(session)
     report = collect()
-    assert report.metadata.ongoing
+    assert report.metadata.is_partial
     assert report.metadata.provenance.last_updated_by.finished_at == NOW
 
 
@@ -370,18 +370,18 @@ def test_comments_reviews_and_publication_semantics(session):
     report = collect()
     by_id = {a.id: a for a in report.activities}
     assert set(by_id) == {
-        "pr_conversation_comment:C_pr",
+        "pr_discussion_comment:C_pr",
         "pr_review:V_one",
-        "pr_inline_review_comment:C_inline",
-        "pr_inline_review_comment:C_reply",
-        "pr_inline_review_comment:C_fallback",
+        "pr_review_comment:C_inline",
+        "pr_review_comment:C_reply",
+        "pr_review_comment:C_fallback",
     }
     assert by_id["pr_review:V_one"].metadata.state == "DISMISSED"
-    assert by_id["pr_inline_review_comment:C_inline"].occurred_at.day == 12
-    reply = by_id["pr_inline_review_comment:C_reply"]
+    assert by_id["pr_review_comment:C_inline"].occurred_at.day == 12
+    reply = by_id["pr_review_comment:C_reply"]
     assert reply.metadata.review_node_id is None
     assert reply.metadata.resolved and reply.metadata.outdated
-    fallback = by_id["pr_inline_review_comment:C_fallback"]
+    fallback = by_id["pr_review_comment:C_fallback"]
     assert (
         fallback.metadata.timestamp_fallback and fallback.metadata.publication_confirmed
     )
@@ -543,7 +543,7 @@ def test_inline_unknown_state_with_publication_and_null_author(session):
     pr_source(session, inline_comments=[inline(state="FUTURE", author=None)])
     report = collect()
     assert report.activities[0].credits == (api.Credit(None, "author"),)
-    assert report.summaries.unattributed_by_type["pr_inline_review_comment"] == 1
+    assert report.summaries.unattributed_by_type["pr_review_comment"] == 1
     assert not report.activities[0].metadata.timestamp_fallback
 
 

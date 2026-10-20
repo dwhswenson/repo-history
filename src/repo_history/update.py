@@ -4,7 +4,7 @@ import logging
 from dataclasses import replace
 from pathlib import Path
 
-from .backfill import _parse_month, _run_backfill
+from .collect import _parse_month, _run_collect
 from .collection import _month_bounds
 from .history import _collect_snapshot, _history_to_months
 from .writing import MONTHLY_FILE, _check_directory, _write_report
@@ -43,8 +43,8 @@ def _run_update(
 ):
     """Update a prevalidated destination and resolved inclusive range."""
     if start is None:
-        LOG.info("No monthly reports found; falling back to history backfill")
-        return _run_backfill(
+        LOG.info("No monthly reports found; collecting all history")
+        return _run_collect(
             owner,
             repo,
             start,

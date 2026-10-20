@@ -1,8 +1,13 @@
 # Repository history tracking
 
-Collect GitHub repository activity with fast full-history backfills and bounded
-updates, then build monthly reports and visualization manifests offline.
+Collect GitHub repository activity with fast full-history collection runs and bounded
+updates, then build monthly reports and visualization summaries offline.
 See [SPEC.md](SPEC.md) for the collection and report contracts.
+
+The unreleased v1 terminology and JSON contracts have changed without compatibility
+aliases. Recollect older datasets into a fresh directory with `collect`, then run
+`summarize` to produce `summary.json` and update embeds to use `summary` and
+`metrics`. Running `summarize` alone cannot convert older monthly reports.
 
 Requires Python 3.12+. Packaging and Pixi configuration are maintained together in
 `pyproject.toml`. Install with `pip install .`, or use the existing Pixi workspace:
@@ -39,26 +44,26 @@ Use `py313`, `py314`, `py315`, `node24`, or `node26` to test another runtime.
 Set `GH_TOKEN` or `GITHUB_TOKEN` before collecting. After installation, use:
 
 ```text
-repo-history backfill example/project --output-directory reports
-repo-history backfill example/project --start 2024-01 --end 2024-12 --output-directory reports
+repo-history collect example/project --output-directory reports
+repo-history collect example/project --start 2024-01 --end 2024-12 --output-directory reports
 repo-history update example/project --output-directory reports
 repo-history update example/project --start 2024-02 --end 2024-06 --output-directory reports
 repo-history summarize --input-directory reports
-repo-history chop-partial reports
+repo-history trim-partial reports
 ```
 
 The output directory is required and is created if missing. All ranges include
 both endpoints; omitted `--end` selects the current **UTC** month at invocation.
-Future months are rejected. Backfill collects all history once,
-then grouping it into monthly reports offline. Omit `--start` to begin at the
+Future months are rejected. The collect command collects all history once,
+then groups it into monthly reports offline. Omit `--start` to begin at the
 earlier of repository creation and the earliest observed activity, including
-imported commits. Empty months are included. Explicit backfill ranges limit
+imported commits. Empty months are included. Explicit collect ranges limit
 output, not the history traversal.
 
 Update collects the requested interval once using experimental
 bounded parent discovery and buffered commit history. Candidate issues and PRs
 are hydrated in batches of up to 20 with their first activity pages, reusing
-backfill's embedded-page queries and collectors. Only overflowing activity
+collect's embedded-page queries and collectors. Only overflowing activity
 connections require follow-up requests; later review-thread pages also include
 their first inline-comment pages. Without `--start`, it
 selects the latest direct-child `YYYY-MM.json` report filename and **recollects
@@ -66,17 +71,16 @@ that month** through the end month. It replaces every selected report, leaves
 earlier files untouched, and does not repair earlier gaps. An end before the
 selected start is an argument error. Existing reports are validated before
 filename inference or network requests; unrelated files and subdirectories are
-ignored. Invalid reports fail rather than triggering a backfill.
+ignored. Invalid reports fail rather than triggering full-history collection.
 
 With no explicit start and no monthly reports (including a missing directory),
-update falls back to history-first backfill with its automatic start. This
+update falls back to full-history collection with its automatic start. This
 fallback uses full history. An explicit start uses bounded range collection even
 when the directory has no reports. Update always collects its requested interval
 once, then groups activities into monthly files; it does not repeat collection
-independently for each month. Backfill always collects full history once.
+independently for each month. The collect command always collects full history once.
 
-The CLI requires one of `backfill`, `update`, `summarize`, or `chop-partial`.
-The former implicit single-month command and `manifest` command have been removed.
+The CLI requires one of `collect`, `update`, `summarize`, `trim-partial`, or `combine`.
 For one month, use update with equal `--start` and `--end` values. Summarization remains an
 explicit offline step after collection.
 
@@ -85,7 +89,7 @@ With Pixi, prefix commands with `pixi run`, for example
 `pixi run repo-history --help`.
 
 Each successful month prints its saved path to stdout immediately, except when
-backfill uses live progress and stdout is a terminal. Progress and
+collect uses live progress and stdout is a terminal. Progress and
 API usage go to stderr. `--verbose` includes debug diagnostics with `issue=N` or
 `pr=N` on relevant nested requests and retries. Paginated requests include a local
 `page=N` counter; retries keep the same number. Embedded first pages log
@@ -96,7 +100,7 @@ paths and all diagnostics except errors. Exit codes are 0 for success, 2 for
 invalid arguments, and 1 for collection, validation, or filesystem failures.
 Rate-limit errors include available retry/reset guidance and stop the run.
 
-Backfill shows a live Rich display on interactive stderr: persistent Issues, PRs,
+Collect shows a live Rich display on interactive stderr: persistent Issues, PRs,
 Commits, Grouping, Writing, Inventory, and Verification rows include processed/total items,
 percentage, elapsed time, and approximate per-stage ETA. The current item and operation show
 nested pagination and retries. Items advance only after their history has been processed; totals
@@ -110,7 +114,7 @@ are shown explicitly.
 
 Redirected stderr and `--verbose` use plain progress messages instead of bars.
 Stage transitions, retries, and completion/failure appear immediately; other
-updates appear at most every 30 seconds when work advances. `backfill --no-progress`
+updates appear at most every 30 seconds when work advances. `collect --no-progress`
 disables the added progress output, retaining ordinary logs. Total-count fields
 remain in the queries even when progress is disabled.
 `--quiet` suppresses progress as well as saved paths. Grouping advances after each
@@ -125,18 +129,18 @@ The live display stays active through collection-state processing
 and replaces the scrolling saved-path list when stdout is a terminal.
 Redirected stdout still receives each saved path immediately, including with live
 progress on stderr; plain/verbose mode and `--no-progress` retain path output.
-These collection stages are specific to the backfill CLI; Python calls and
+These collection stages are specific to the collect CLI; Python calls and
 `update` (including its full-history fallback) keep their existing output behavior.
 
-Python callers can collect without writing, write an existing report, or backfill:
+Python callers can collect without writing, write an existing report, or collect:
 
 ```python
-from repo_history import backfill, collect_history, history_to_months, write_report
+from repo_history import collect, collect_history, history_to_months, write_report
 
 history = collect_history("example", "project")
 report = history_to_months(history, "2024-02", "2024-02")[0]
 path = write_report(report, "reports")  # pathlib.Path: reports/2024-02.json
-paths = backfill(
+paths = collect(
     "example",
     "project",
     "2024-01",
@@ -146,13 +150,13 @@ paths = backfill(
 )
 ```
 
-`backfill("example", "project", output_directory="reports")` uses the same
-automatic endpoints. `backfill` also accepts `token=None` and returns a
-chronological list of saved paths on success. Backfill finishes collection
+`collect("example", "project", output_directory="reports")` uses the same
+automatic endpoints. `collect` also accepts `token=None` and returns a
+chronological list of saved paths on success. Collect finishes collection
 and validates all selected reports before writing: collection or grouping failure
 leaves existing files untouched. Writing failures preserve already saved months.
 There is no automatic skipping, rollback, or resume.
-Reruns replace every requested month, including during backfill, without changing
+Reruns replace every requested month, including during collect, without changing
 other months.
 
 An output directory holds monthly reports for **one repository node ID**.
@@ -160,9 +164,9 @@ Before writing, every direct child named `YYYY-MM.json` must be a valid report,
 match its filename's month, and share that repository identity. Repository renames
 are allowed. Damaged files are rejected even when being replaced; move or repair
 them before retrying. Unrelated filenames and nested directories are ignored.
-Backfill and update check existing files before making network requests; repository
+Collect and update check existing files before making network requests; repository
 identity is compared immediately after repository lookup in history and range
-collection, before traversing parents or commits. Backfill and update validate the destination before collection and retain its
+collection, before traversing parents or commits. Collect and update validate the destination before collection and retain its
 history evidence while replacing reports. State publication subsequently verifies
 the saved inventory; standalone writes validate their destination too.
 
@@ -172,7 +176,7 @@ replacement preserves the old file and cleans up the temporary file. Invalid
 incoming reports raise `ReportValidationError`; invalid or conflicting existing
 files raise `ReportWriteError` with the filename; filesystem errors propagate.
 Writers must run sequentially or use external coordination. Atomic replacement
-does not provide power-loss durability or a transactional multi-month backfill.
+does not provide power-loss durability or a transactional multi-month collect.
 
 Test suites mirror source module names with a `test_` prefix: for example,
 `tests/test_queries.py` tests
@@ -224,23 +228,23 @@ later. Future-dated source activities remain in the snapshot but are excluded
 from supported output months until a later collection.
 
 History collection holds the complete normalized history in memory; there is no
-disk cache or interruption resume. Use backfill for initial builds and update for
+disk cache or interruption resume. Use collect for initial builds and update for
 recent intervals.
 Collection logs include elapsed time, request attempts, retries, measured REST and
-GraphQL points, and unmeasured attempts. Backfill also logs grouping/writing time.
+GraphQL points, and unmeasured attempts. Collect also logs grouping/writing time.
 See [PERFORMANCE.md](PERFORMANCE.md) for deterministic measurements and limitations.
 
 ## Collection strategies
 
-Backfill and update share one collector and activity normalization implementation.
-Backfill scans full history; update collects one requested interval. Both include
+Collect and update share one collector and activity normalization implementation.
+Collect scans full history; update collects one requested interval. Both include
 `issue_opened`, `issue_closed`, `issue_reopened`, `pr_opened`, `pr_merged`,
-`issue_comment`, `pr_conversation_comment`, `pr_review`,
-`pr_inline_review_comment`, and `commit` activities. Coverage limitations are
+`issue_comment`, `pr_discussion_comment`, `pr_review`,
+`pr_review_comment`, and `commit` activities. Coverage limitations are
 recorded in `metadata.coverage.limitations`.
 
 Months use exact UTC half-open boundaries. Future months and invalid CLI inputs
-are rejected before network requests. The ongoing flag uses collection start,
+are rejected before network requests. The partial flag uses collection start,
 even if the run finishes in a later month. Repository identity and the
 default-branch head are captured once, including a null head for an empty
 repository. The collector owns and closes its client, including on failure.
@@ -256,15 +260,15 @@ repo-history update example/project --start 2024-02 --end 2024-02 --output-direc
 
 Python callers can collect full history with `collect_history()` and select
 months offline with `history_to_months()`. The report, serialization, validation,
-writing, and manifest APIs remain available.
-Existing reports with `collect_month` provenance can still be read and summarized.
+writing, and summary APIs remain available.
+Reports using the current schema may retain `collect_month` provenance.
 
 ### Buffered commit collection in update
 
 Update collects commits from the captured default-branch SHA with GraphQL history
 bounded by 24 hours before interval start and 24 hours after interval end. It
 traverses every returned history page and filters committed dates locally to the
-exact interval before grouping into months. Backfill walks that captured head's
+exact interval before grouping into months. Collect walks that captured head's
 history without date filters.
 
 Authored date and committer metadata are preserved. Merge commits count, and each
@@ -307,7 +311,7 @@ API version `2026-03-10`.
 
 **Bounded discovery is experimental.** It has not been established that every
 counted activity advances its parent's REST update timestamp. A stale timestamp
-can therefore omit activity. Full-history backfill remains available when a full
+can therefore omit activity. Full-history collection remains available when a full
 traversal is needed. Only offline fixtures have been verified, including the
 disabled-issues case; live REST behavior when issues are disabled remains
 unverified. Update still requests REST parents and collects PRs when issues are
@@ -489,7 +493,7 @@ metadata = ReportMetadata(
     month_start=datetime(2024, 2, 1, tzinfo=timezone.utc),
     month_end=datetime(2024, 3, 1, tzinfo=timezone.utc),
     provenance=Provenance(run, run, run), coverage=Coverage(now),
-    ongoing=False, default_branch=None, default_branch_head=None,
+    is_partial=False, default_branch=None, default_branch_head=None,
 )
 report = build_report(metadata, actors=[], activities=[])
 text = report_to_json(report)
@@ -497,7 +501,7 @@ text = report_to_json(report)
 
 The package exports all report dataclasses, `build_report`, `validate_report`,
 `report_to_json`, `report_from_json`, `load_schema`, `derive_summaries`,
-`git_identity_key`, and `unresolved_git_actor`. Contract violations raise
+`git_identity_key`, and `unlinked_git_actor`. Contract violations raise
 `ReportValidationError` with a field/record `path` and explanatory message.
 Dataclasses are frozen records; construction alone does not validate them.
 Build/validate/serialization operations enforce the contract. Nested summary
@@ -514,8 +518,8 @@ nulls remain representable. Schema versioning is independent of package versioni
 
 Metadata nests repository identity and creation time in `repository`, collection
 provenance in `provenance`, and observation time and limitations in `coverage`.
-It also records UTC month boundaries, `ongoing`, and captured default branch/head.
-`ongoing` reflects `coverage.as_of < month_end`, not the original report's creation
+It also records UTC month boundaries, `is_partial`, and captured default branch/head.
+`is_partial` reflects `coverage.as_of < month_end`, not the original report's creation
 time or the reader's clock. Current collectors conservatively use collection start
 as the observation time. Null branch/head denotes an empty repository. Event
 occurrence must lie in `[month_start, month_end)`; source timestamps can be
@@ -524,7 +528,7 @@ future-dated. Aware datetimes normalize to UTC `Z`; naive datetimes are invalid.
 `repository.history_start_month` and `history_start_established_by` are either both
 null (unknown) or both present. Full-history collection establishes the earlier of
 repository creation and earliest observed activity, including imported commits.
-Backfill retains this evidence even when an explicit output range omits early
+Collect retains this evidence even when an explicit output range omits early
 months. Bounded collection cannot establish the boundary; updates preserve prior
 evidence and never move the known boundary later. Explicit reports preceding a
 known boundary must be zero activity.
@@ -540,7 +544,7 @@ Every run records a UUID, entry point (`command`), `mode` (`rebuild` or
 `incremental`), collector version, collection timestamps, nullable historical
 collection bounds, nullable requested output month bounds, and actual
 `parent_discovery`/`commit_history` strategies. Null bounds mean unbounded; null
-strategies mean unknown. Backfill always traverses full history, so requested
+strategies mean unknown. Collect always traverses full history, so requested
 output start and collection start are independent. A run ID always identifies
 one immutable descriptor. Coverage limitations describe the resulting data;
 incremental refreshes must not erase unresolved limitations.
@@ -548,12 +552,12 @@ incremental refreshes must not erase unresolved limitations.
 The shared definitions live in packaged `schemas/common-v1.json`; Python and
 browser validation resolve them locally without fetching schemas. These
 unreleased v1 contracts were revised in place. Regenerate older reports and
-manifests: obsolete layouts are rejected rather than migrated.
+summaries: obsolete layouts are rejected rather than migrated.
 
 Each activity has `id`, `type`, `occurred_at`, nullable `url`, a `subject`,
 `credits`, and type-specific `metadata`. Types are `commit`, `pr_opened`,
 `pr_merged`, `issue_opened`, `issue_closed`, `issue_reopened`, `issue_comment`,
-`pr_conversation_comment`, `pr_inline_review_comment`, and `pr_review`.
+`pr_discussion_comment`, `pr_review_comment`, and `pr_review`.
 Node-backed IDs are `<type>:<source_node_id>`; commit IDs are
 `commit:<repository_node_id>:<sha>`. Commits use committed time as occurrence and
 retain authored time, parents, and committer metadata. Their title is the first
@@ -579,7 +583,7 @@ issue's current reason. Every closure/reopening has a separate event ID.
 
 Linked humans and explicitly identified bots use GitHub node IDs as keys; logins
 are mutable metadata. Supply bot classification only with explicit source
-evidence: names do not establish bot status. Unresolved Git identities use
+evidence: names do not establish bot status. Unlinked Git identities use
 `git:email:<sha256>` of trimmed casefolded email, falling back to
 `git:name:<sha256>` of trimmed case-preserved name. Original names/emails are
 retained. No usable email/name yields null. These estimates may merge distinct
@@ -589,7 +593,7 @@ Repository counts count events once. Per-actor counts count each distinct
 credited actor once per event, even with multiple roles. Committers and subject
 authors are context unless independently credited. Counts contain all ten types,
 including zeros. `distinct_actors` and `distinct_actors_by_type` count only credited
-actors, divided into `total`, `human`, `bot`, and `unresolved_git`.
+actors, divided into `total`, `human`, `bot`, and `unlinked_git`.
 `actor_counts` contains only credited actors. `unattributed_total` and
 `unattributed_by_type` count events with no known credited actor; a known author
 plus a null co-author remains attributed. Actors referenced only as context may
@@ -614,37 +618,37 @@ in `metadata.coverage.limitations`.
 
 MIT. See [LICENSE](LICENSE).
 
-## Visualization manifests
+## Visualization summaries
 
-After collecting monthly reports, generate a self-contained summary manifest offline:
+After collecting monthly reports, generate a self-contained history summary offline:
 
 ```sh
 repo-history summarize --input-directory reports
-repo-history summarize --input-directory reports --output public/reports/manifest.json
+repo-history summarize --input-directory reports --output public/reports/summary.json
 ```
 
 On interactive stderr, `summarize` shows a Rich progress bar for reading and
-validating the monthly reports, with status text while saving the manifest. The display
+validating the monthly reports, with status text while saving the summary. The display
 includes report totals, elapsed time, approximate ETA, and the current filename.
-The output manifest path is printed to stdout after the display finishes.
+The output summary path is printed to stdout after the display finishes.
 Redirected stderr and `--verbose` use throttled plain progress messages;
 `--no-progress` disables added progress, and `--quiet` suppresses progress and the
-saved path while retaining errors. Python manifest APIs remain silent by default.
+saved path while retaining errors. Python summary APIs remain silent by default.
 
-Publish the resulting `manifest.json` and the `repo-history-viz` bundle. The browser loads only the manifest. It contains a display name, repository registry, monthly aggregate and source summaries, stable actor keys with classifications, and coverage metadata; full event records and actor profile fields remain in the monthly files. The generator validates every source report and atomically replaces the manifest. Rebuild explicitly after adding, replacing, or deleting reports; backfill and update remain independent. Do not modify source reports concurrently with generation.
+Publish the resulting `summary.json` and the `repo-history-viz` bundle. The browser loads only the summary. It contains a display name, repository registry, monthly aggregate and source summaries, stable actor keys with classifications, and coverage metadata; full event records and actor profile fields remain in the monthly files. The generator validates every source report and atomically replaces the summary. Rebuild explicitly after adding, replacing, or deleting reports; collect and update remain independent. Do not modify source reports concurrently with generation.
 
-The Python APIs are `build_manifest(reports, *, display_name=None) -> dict` and `write_manifest(report_directory, *, output_path=None, display_name=None) -> Path`. The packaged contract is `schemas/viz-manifest-v1.json`, independently versioned from monthly reports. The generator rejects empty directories, wrong month filenames, mixed repositories, and conflicting classifications for participating actors. Only immediate monthly report files are read; unrelated files and subdirectories are ignored.
+The Python APIs are `build_summary(reports, *, display_name=None) -> dict` and `write_summary(report_directory, *, output_path=None, display_name=None) -> Path`. The packaged contract is `schemas/viz-summary-v1.json`, independently versioned from monthly reports. The generator rejects empty directories, wrong month filenames, mixed repositories, and conflicting classifications for participating actors. Only immediate monthly report files are read; unrelated files and subdirectories are ignored.
 
-See [the visualizer documentation](repo-history-viz/README.md) for the `loadManifestSource()` API and embedding examples.
+See [the visualizer documentation](repo-history-viz/README.md) for the `loadSummarySource()` API and embedding examples.
 
 ### Removing a trailing partial month
 
-Use `repo-history chop-partial reports` or
-`repo-history chop-partial reports/manifest.json` to edit an existing manifest
+Use `repo-history trim-partial reports` or
+`repo-history trim-partial reports/summary.json` to edit an existing summary
 in place, offline and without GitHub credentials. The command accepts exactly one
-input: either a manifest file or a directory containing `manifest.json`.
+input: either a summary file or a directory containing `summary.json`.
 It removes the chronologically latest month when that month has
-`metadata.ongoing: true`, even for an older snapshot. Actors used only in the
+`metadata.is_partial: true`, even for an older snapshot. Actors used only in the
 removed month are pruned. Monthly report files and `collection-state.json` remain
 untouched. Running `summarize` again rebuilds from all reports and may restore
 the removed month.
@@ -652,7 +656,7 @@ the removed month.
 To save to a separate file, use `--output` or `-o`:
 
 ```sh
-repo-history chop-partial reports -o public/manifest.json
+repo-history trim-partial reports -o public/summary.json
 ```
 
 The input is preserved when the output is a different path. The output's parent
@@ -661,12 +665,12 @@ contents are still saved to the explicit output. The output must be a file path
 and cannot use a monthly report filename (`YYYY-MM.json`). Omitting it
 keeps the default in-place behavior.
 
-All months before the latest must be complete; any earlier ongoing month is an
+All months before the latest must be complete; any earlier partial month is an
 error, even when the latest month is complete. Removal also errors if it would
 leave no months. If all months are complete, an in-place run succeeds silently
-without rewriting the manifest.
+without rewriting the summary.
 
-The input and edited result are validated before writing. The manifest is saved
+The input and edited result are validated before writing. The summary is saved
 atomically, printing its destination path after saving.
 Use sequential writers or external coordination. `--quiet` suppresses saved paths
 and retains errors; `--verbose` adds diagnostics. Exit codes follow the other CLI
@@ -674,23 +678,23 @@ commands: 0 for success, 2 for argument errors, and 1 for validation or filesyst
 failures. Repeated in-place invocations succeed silently after the partial month
 is removed.
 
-CLI commands can reuse `repo_history.manifest.resolve_manifest_path(path)` to
-resolve a file or directory to a manifest path. It accepts strings and path-like
+CLI commands can reuse `repo_history.summary.resolve_summary_path(path)` to
+resolve a file or directory to a summary path. It accepts strings and path-like
 objects, preserves relative paths, and leaves existence and content validation
 to the reader. Commands accepting multiple inputs can apply it to each input.
 
-### Combining manifests
+### Combining summaries
 
-Combine at least two manifests into one dataset, offline and without GitHub
+Combine at least two summaries into one dataset, offline and without GitHub
 credentials:
 
 ```sh
-repo-history combine-manifests reports/repo-a reports/repo-b/manifest.json \
-  --output public/manifest.json --display-name "Project activity"
+repo-history combine reports/repo-a reports/repo-b/summary.json \
+  --output public/summary.json --display-name "Project activity"
 ```
 
-Each positional input accepts a filename or directory containing `manifest.json`,
-just like `chop-partial`. Inputs may already contain multiple repositories, but
+Each positional input accepts a filename or directory containing `summary.json`,
+just like `trim-partial`. Inputs may already contain multiple repositories, but
 their repository sets must be disjoint. A repeated repository node ID is an error,
 even across different month ranges, renamed repositories, or identical files.
 Conflicting classifications for a shared actor key are also errors, including
@@ -700,11 +704,11 @@ Both `--output` (or `-o`) and a nonblank `--display-name` are required. The outp
 must be a separate file, cannot alias an input through a symlink or hard link,
 and cannot use a monthly report filename (`YYYY-MM.json`). Parent directories
 are created as needed. An existing separate output is replaced atomically only
-after all inputs and the assembled manifest validate. Inputs, monthly reports,
+after all inputs and the assembled summary validate. Inputs, monthly reports,
 and collection-state files are left unchanged. Keep inputs stable while combining.
 
 The candidate range spans the earliest through latest input month. By default,
-an entire calendar month is excluded if any source marks it ongoing, with a
+an entire calendar month is excluded if any source marks it partial, with a
 warning identifying the month and responsible repositories. This uses the stored
 coverage flag, regardless of today's date. Add `--include-partial` to retain those
 months and their source-specific coverage warnings. At least one month must
@@ -720,7 +724,7 @@ Collected zero-activity months remain present.
 Event counts and per-actor counts are summed across sources; distinct contributor
 populations are recomputed from actor-key unions. The viewer unions the same keys
 across months for cumulative contributors. Linked accounts deduplicate by stable
-GitHub node ID; unresolved Git identities remain estimates and are not reconciled
+GitHub node ID; unlinked Git identities remain estimates and are not reconciled
 with linked accounts. Shared commits count once per repository. Source summaries,
 provenance, and coverage metadata are preserved, and actors used only in excluded
 months are pruned. Reordering inputs produces identical output bytes.
@@ -729,11 +733,11 @@ On success the command prints the destination path to stdout. Warnings and
 diagnostics go to stderr; `--quiet` suppresses saved paths and warnings while
 retaining errors, and `--verbose` adds diagnostics. There is no progress display.
 Exit codes are 0 for success, 2 for argument errors, and 1 for validation or
-filesystem failures. The resulting manifest loads directly in `repo-history-viz`.
+filesystem failures. The resulting summary loads directly in `repo-history-viz`.
 
 ## Repository collection state
 
-Successful `backfill` and `update` operations also write `collection-state.json`
+Successful `collect` and `update` operations also write `collection-state.json`
 in their output directory. This is one current state file per repository dataset,
 replaced after successful report writes; it is neither one file per month nor an
 archive of runs. It is not needed by the visualizer and need not be published.
@@ -747,7 +751,7 @@ These are observation facts under the recorded limitations, not a guarantee that
 an exact timestamp filter discovers every later change. Pagination cursors are
 not durable checkpoints.
 
-A resumable baseline is emitted only when a full-history backfill saves every
+A resumable baseline is emitted only when a full-history collection saves every
 month from the established history start through its current UTC month, refreshes
 every inventoried report from that run, and leaves no observed future-month
 activity unmaterialized. Partial ranges, historical end dates, mixed refreshes,
@@ -763,12 +767,12 @@ and `load_collection_state_schema()` are exported; disk inventory verification i
 available as `repo_history.state.verify_collection_state(data, directory)`.
 No incremental collection or automatic resume is implemented yet.
 
-## Prepared multi-repository manifests
+## Prepared multi-repository summaries
 
 The visualization contract now supports `display_name`, `repositories`, `actors`,
 and `months`. `summarize --display-name "Project activity"` sets the title; its
 default is the latest `owner/repo` name. Summarize still rejects mixed repositories;
-use `combine-manifests` to combine existing manifests from disjoint repositories.
+use `combine` to combine existing summaries from disjoint repositories.
 
 Each month has calendar `metadata`, chart-facing `summaries`, and `source_reports`.
 Each source retains the revised monthly metadata and its own summaries, including
@@ -781,7 +785,7 @@ repository; equivalent changes and fork ancestry are not deduplicated.
 Both validators check source/aggregate consistency. Multi-repository months must
 be contiguous, have at most one source per repository, and include every
 repository unless that month precedes its known history start. Unknown boundaries
-cannot justify implicit zeros. Single-repository manifests may retain gaps.
-Ongoing sources remain representable and visible. `combine-manifests` excludes an
-entire calendar month by default when any source is ongoing, warning instead of
+cannot justify implicit zeros. Single-repository summaries may retain gaps.
+Partial sources remain representable and visible. `combine` excludes an
+entire calendar month by default when any source is partial, warning instead of
 silently undercounting; `--include-partial` retains those months explicitly.

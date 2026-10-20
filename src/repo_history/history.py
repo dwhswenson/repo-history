@@ -183,8 +183,8 @@ def _history_to_months(
     history, start=None, end=None, *, parent_discovery="full", commit_history="full"
 ):
     """Shared projection with explicit collection provenance."""
-    # Imported lazily because backfill integrates this module's collector.
-    from .backfill import _parse_month, _validate_range
+    # Imported lazily because collect integrates this module's collector.
+    from .collect import _parse_month, _validate_range
 
     if not isinstance(history, RepositoryHistory):
         raise ValueError("history must be a RepositoryHistory")

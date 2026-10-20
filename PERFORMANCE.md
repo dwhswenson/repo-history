@@ -3,19 +3,19 @@
 The repository has two collection workflows, both using the same embedded-page
 activity collectors:
 
-- `backfill`: collect full history once, then group selected months offline.
+- `collect`: collect full history once, then group selected months offline.
 - `update`: collect the selected interval once with bounded parent discovery and
   buffered commit history, then group selected months offline.
 
 Without an explicit start, update recollects the latest monthly report and every
-subsequent month through its end. No reports triggers full-history backfill.
+subsequent month through its end. No reports triggers full-history collection.
 For a single month, use update with equal start and end values. There is no
 independent monthly collector or selectable collection mode. `summarize` builds
-a visualization manifest offline and remains a separate step.
+a visualization summary offline and remains a separate step.
 
-## Full-history backfill
+## Full-history collection
 
-Backfill uses one client and repository lookup, exhausts accessible issue and PR
+Collect uses one client and repository lookup, exhausts accessible issue and PR
 connections and their nested activity histories, and walks commits reachable from
 the captured default-branch head without date filters. It retains the normalized
 snapshot in memory and groups it into monthly reports without more API requests.
@@ -29,12 +29,12 @@ pages. Lean activity and inline-comment continuation queries request up to 100
 items, while thread continuations request up to 10.
 
 The deterministic history fixture covers all activity types and independent
-parent/activity/commit pagination. Its January–March 2024 backfill uses **16
+parent/activity/commit pagination. Its January–March 2024 collect uses **16
 GraphQL requests**, with one synthetic point per response. The test asserts one
 repository lookup and no separate activity first-page requests:
 
 ```text
-pixi run -e dev python -m pytest tests/test_history.py::test_backfill_collects_once_and_groups_offline -q
+pixi run -e dev python -m pytest tests/test_history.py::test_collect_collects_once_and_groups_offline -q
 ```
 
 ## Bounded update
@@ -46,7 +46,7 @@ pagination, deduplicates item numbers, and locally retains parents satisfying
 an older parent's in-period activity.
 
 GraphQL hydration batches contain at most 20 parents and use the same embedded
-activity fragments as backfill. Each retained parent's activity connections are
+activity fragments as collect. Each retained parent's activity connections are
 exhausted, with exact interval filtering applied locally. Commit history is
 queried once from the captured head, with a 24-hour buffer around the interval.
 The collector does not repeat traversal for each output month.
@@ -88,7 +88,7 @@ activities, actors, and summaries, and check strategy/coverage differences
 separately. Excluded parents are outside bounded collection's validation scope.
 
 Buffered commit history can also miss matching ancestors behind unusually old
-intermediate timestamps. Full-history backfill has no API date filter and avoids
+intermediate timestamps. Full-history collection has no API date filter and avoids
 that particular limitation. Internal date-boundary fallbacks are selected before
 traversal and recorded in provenance. Request failures never silently switch
 strategies.
@@ -98,7 +98,7 @@ strategies.
 Live performance comparisons and completeness verification have not been run.
 Future read-only comparisons should use equivalent credentials and intervals,
 record captured heads, and distinguish changing source data from algorithmic
-differences. Measure:
+differences. Metric:
 
 - Elapsed time and variability across repeated runs.
 - REST and GraphQL requests, retries, throttling, and primary-budget points
@@ -111,7 +111,7 @@ submitted reviews, inline comments, replies, and publication of previously
 drafted comments. Include old closed/merged parents and disabled issues. Matching
 samples increase confidence without proving a universal API guarantee.
 
-Backfill INFO timing records cover four non-overlapping phases, on success or
+Collect INFO timing records cover four non-overlapping phases, on success or
 failure:
 
 - Preparation: request validation and checking destination reports.
@@ -124,10 +124,10 @@ failure:
   cleanup.
 
 Add these records' `elapsed_seconds` values to compare against the final
-`Backfill summary`. That summary reports `total_elapsed_seconds`,
+`Collect summary`. That summary reports `total_elapsed_seconds`,
 `phase_elapsed_seconds`, and their difference, `unaccounted_seconds`; its total
 is not another additive phase. The CLI total includes argument parsing, display
-setup, and display cleanup; library calls measure the backfill operation itself.
+setup, and display cleanup; library calls measure the collection operation itself.
 Interpreter startup and imports before CLI entry are outside the total. The
 overlapping grouping-only timing is DEBUG rather than INFO.
 

@@ -1,30 +1,30 @@
 import { describe, expect, it, vi } from "vitest";
-import { loadManifest, parseManifest } from "../src/report";
-import { fixture, manifestSource, toManifest } from "./fixtures";
-import generated from "../../tests/fixtures/viz-manifest-v1.json" with { type: "json" };
-import combined from "../../tests/fixtures/combined-manifest-v1.json" with { type: "json" };
+import { loadSummary, parseSummary } from "../src/report";
+import { fixture, summarySource, toSummary } from "./fixtures";
+import generated from "../../tests/fixtures/viz-summary-v1.json" with { type: "json" };
+import combined from "../../tests/fixtures/combined-summary-v1.json" with { type: "json" };
 
-describe("summary manifests", () => {
-  it("accepts Python-generated manifests and sorts months", () => {
+describe("history summaries", () => {
+  it("accepts Python-generated summaries and sorts months", () => {
     expect(
-      parseManifest({ name: "python.json", text: JSON.stringify(generated) }),
+      parseSummary({ name: "python.json", text: JSON.stringify(generated) }),
     ).toEqual(generated);
-    const value = toManifest([fixture("2024-03", true), fixture()]);
+    const value = toSummary([fixture("2024-03", true), fixture()]);
     expect(
-      parseManifest({ name: "m", text: JSON.stringify(value) }).months.map(
+      parseSummary({ name: "m", text: JSON.stringify(value) }).months.map(
         (m) => m.metadata.month,
       ),
     ).toEqual(["2024-02", "2024-03"]);
   });
   it("identifies malformed JSON", () =>
-    expect(() => parseManifest({ name: "bad.json", text: "{" })).toThrow(
+    expect(() => parseSummary({ name: "bad.json", text: "{" })).toThrow(
       "bad.json: invalid JSON",
     ));
   it.each([{ files: ["2024-02.json"] }, fixture()])(
-    "rejects unsupported input formats with manifest generation guidance",
+    "rejects unsupported input formats with summary generation guidance",
     (value) => {
       expect(() =>
-        parseManifest({
+        parseSummary({
           name: "unsupported.json",
           text: JSON.stringify(value),
         }),
@@ -52,7 +52,7 @@ describe("summary manifests", () => {
         "2024-01-01T00:00:00Z";
     },
     (m: any) => {
-      m.months[0].metadata.ongoing = true;
+      m.months[0].metadata.is_partial = true;
     },
     (m: any) => {
       delete m.actors[Object.keys(m.actors)[0]];
@@ -85,50 +85,50 @@ describe("summary manifests", () => {
     (m: any) => {
       m.months[0].summaries.actor_counts[Object.keys(m.actors)[0]].commit = 100;
     },
-  ])("rejects inconsistent manifests %#", (mutate) => {
-    const value = toManifest([fixture()]);
+  ])("rejects inconsistent summaries %#", (mutate) => {
+    const value = toSummary([fixture()]);
     mutate(value);
     expect(() =>
-      parseManifest({ name: "bad", text: JSON.stringify(value) }),
+      parseSummary({ name: "bad", text: JSON.stringify(value) }),
     ).toThrow();
   });
 });
-describe("hosted manifest", () => {
+describe("hosted summary", () => {
   it("fetches the complete dataset once without credentials", async () => {
     const fetcher = vi
       .fn<typeof fetch>()
-      .mockResolvedValue(new Response(manifestSource().text));
-    const value = await loadManifest(
-      "reports/manifest.json",
+      .mockResolvedValue(new Response(summarySource().text));
+    const value = await loadSummary(
+      "reports/summary.json",
       "https://example.org/viewer/",
       fetcher,
     );
     expect(value.months).toHaveLength(1);
     expect(fetcher).toHaveBeenCalledExactlyOnceWith(
-      "https://example.org/viewer/reports/manifest.json",
+      "https://example.org/viewer/reports/summary.json",
       { credentials: "omit" },
     );
   });
   it("propagates HTTP, JSON, protocol and network errors", async () => {
     await expect(
-      loadManifest(
+      loadSummary(
         "/m",
         "https://example.org",
         vi.fn().mockResolvedValue(new Response("", { status: 404 })),
       ),
-    ).rejects.toThrow("Manifest: HTTP 404");
+    ).rejects.toThrow("History summary: HTTP 404");
     await expect(
-      loadManifest(
+      loadSummary(
         "/m",
         "https://example.org",
         vi.fn().mockResolvedValue(new Response("{")),
       ),
     ).rejects.toThrow("invalid JSON");
     await expect(
-      loadManifest("file:///tmp/m", "https://example.org"),
+      loadSummary("file:///tmp/m", "https://example.org"),
     ).rejects.toThrow("HTTP or HTTPS");
     await expect(
-      loadManifest(
+      loadSummary(
         "/m",
         "https://example.org",
         vi.fn().mockRejectedValue(new Error("offline")),
@@ -137,18 +137,18 @@ describe("hosted manifest", () => {
   });
 });
 
-describe("prepared multi-repository manifests", () => {
+describe("prepared multi-repository summaries", () => {
   it("accepts the CLI-generated fixture spanning repositories and months", () => {
     expect(
-      parseManifest({ name: "combined.json", text: JSON.stringify(combined) }),
+      parseSummary({ name: "combined.json", text: JSON.stringify(combined) }),
     ).toEqual(combined);
   });
   it("accepts the Python contract fixture with deduplicated populations", async () => {
     const { default: fixture } = await import(
-      "../../tests/fixtures/multi-repo-manifest-v1.json",
+      "../../tests/fixtures/multi-repo-summary-v1.json",
       { with: { type: "json" } }
     );
-    const value = parseManifest({
+    const value = parseSummary({
       name: "multi.json",
       text: JSON.stringify(fixture),
     });
@@ -161,7 +161,7 @@ describe("prepared multi-repository manifests", () => {
     "rejects invalid %s source data",
     async (problem) => {
       const { default: fixture } = await import(
-        "../../tests/fixtures/multi-repo-manifest-v1.json",
+        "../../tests/fixtures/multi-repo-summary-v1.json",
         { with: { type: "json" } }
       );
       const value = structuredClone(fixture),
@@ -179,7 +179,7 @@ describe("prepared multi-repository manifests", () => {
         month.source_reports[1]!.metadata.provenance.created_by.collector_version =
           "conflict";
       expect(() =>
-        parseManifest({ name: "bad.json", text: JSON.stringify(value) }),
+        parseSummary({ name: "bad.json", text: JSON.stringify(value) }),
       ).toThrow();
     },
   );

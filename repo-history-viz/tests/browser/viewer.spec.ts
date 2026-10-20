@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
-import { manifestSource as source, combinedSource, fixture } from "../fixtures";
+import { summarySource as source, combinedSource, fixture } from "../fixtures";
 
 async function csvLines(page: Page): Promise<string[]> {
   const ready = page.waitForEvent("download");
@@ -23,27 +23,36 @@ test("local files, controls, gaps, range sliders, and failed replacement", async
       name: "A clearer view of repository activity",
     }),
   ).toBeVisible();
-  await page.getByLabel("Choose manifest JSON").setInputFiles({
-    name: "manifest.json",
+  await page.getByLabel("Choose summary JSON").setInputFiles({
+    name: "summary.json",
     mimeType: "application/json",
     buffer: Buffer.from(
       combinedSource([fixture(), fixture("2024-04", true)]).text,
     ),
   });
   await expect(page.locator("#repository-name")).toHaveText("example/project");
+  await expect(
+    page.getByRole("group", { name: "Aggregation", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("group", { name: "Activity types", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByLabel("Show combined total", { exact: true }),
+  ).toBeVisible();
   await expect(page.locator("#warnings")).toContainText(
     "Missing reports: 2024-03",
   );
   expect(await csvLines(page)).toHaveLength(4);
   expect((await csvLines(page))[2]).toContain('"2024-03","No report"');
   await page
-    .getByLabel("Measure", { exact: true })
-    .selectOption("contributors");
+    .getByLabel("Metric", { exact: true })
+    .selectOption("contributors-by-type");
   await page.getByRole("button", { name: "Clear", exact: true }).click();
   await page.getByLabel("Commits", { exact: true }).check();
   await page
-    .getByLabel("Measure", { exact: true })
-    .selectOption("contributors");
+    .getByLabel("Metric", { exact: true })
+    .selectOption("contributors-by-type");
   await page.getByLabel("Cumulative", { exact: true }).check();
   await expect(page.locator("#chart-title")).toHaveText(
     "Cumulative contributors by type",
@@ -54,7 +63,7 @@ test("local files, controls, gaps, range sliders, and failed replacement", async
     '"2024-03","No report","No report"',
     '"2024-04","Collected","3"',
   ]);
-  await page.getByLabel("Unresolved Git identities", { exact: true }).uncheck();
+  await page.getByLabel("Unlinked Git identities", { exact: true }).uncheck();
   expect((await csvLines(page))[1]).toBe('"2024-02","Collected","1"');
   await page.getByRole("slider", { name: "From", exact: true }).focus();
   await page.getByRole("slider", { name: "From", exact: true }).press("End");
@@ -83,7 +92,7 @@ test("local files, controls, gaps, range sliders, and failed replacement", async
   );
   await page.getByRole("button", { name: "All available months" }).click();
   expect(await csvLines(page)).toHaveLength(4);
-  await page.getByLabel("Choose manifest JSON").setInputFiles({
+  await page.getByLabel("Choose summary JSON").setInputFiles({
     name: "broken.json",
     mimeType: "application/json",
     buffer: Buffer.from("{"),
@@ -104,14 +113,14 @@ test("hosted reports, partial months, combined contributors, and mobile layout",
   page,
 }) => {
   const partial = fixture("2024-03");
-  partial.metadata.ongoing = true;
+  partial.metadata.is_partial = true;
   partial.metadata.coverage.as_of = "2024-03-15T12:00:00Z";
 
-  await page.route("**/reports/manifest.json", (route) =>
+  await page.route("**/reports/summary.json", (route) =>
     route.fulfill({ body: combinedSource([partial, fixture()]).text }),
   );
   await page.goto("/");
-  await page.getByLabel("Hosted manifest URL").fill("/reports/manifest.json");
+  await page.getByLabel("Hosted summary URL").fill("/reports/summary.json");
   await page.getByRole("button", { name: "Load URL" }).click();
   await expect(page.locator("#repository-name")).toHaveText("example/project");
   await expect(page.locator("#load-status")).toBeHidden();
@@ -119,15 +128,15 @@ test("hosted reports, partial months, combined contributors, and mobile layout",
     "Partial month: 2024-03-01 — 2024-03-15 (UTC).",
   );
   await page
-    .getByLabel("Measure", { exact: true })
-    .selectOption("contributors");
+    .getByLabel("Metric", { exact: true })
+    .selectOption("contributors-by-type");
   await page.getByRole("button", { name: "Clear", exact: true }).click();
   await page.getByLabel("Commits", { exact: true }).check();
   await page.getByLabel("Pull requests opened", { exact: true }).check();
-  await page.getByLabel("Show selected types combined").check();
+  await page.getByLabel("Show combined total").check();
   await page
-    .getByLabel("Measure", { exact: true })
-    .selectOption("contributors");
+    .getByLabel("Metric", { exact: true })
+    .selectOption("contributors-by-type");
   await page.getByLabel("Cumulative", { exact: true }).check();
   expect((await csvLines(page)).at(-1)).toBe('"2024-03","Partial","3","1","3"');
   await page.setViewportSize({ width: 390, height: 844 });
@@ -143,33 +152,35 @@ test("hosted reports, partial months, combined contributors, and mobile layout",
     path: "test-results/dashboard-mobile.png",
     fullPage: true,
   });
-  await page.route("**/reports/manifest.json", (route) =>
+  await page.route("**/reports/summary.json", (route) =>
     route.fulfill({ status: 404, body: "Not found" }),
   );
   await page.getByRole("button", { name: "Load URL" }).click();
-  await expect(page.locator("#load-error")).toContainText("Manifest: HTTP 404");
+  await expect(page.locator("#load-error")).toContainText(
+    "History summary: HTTP 404",
+  );
   await expect(page.locator("#repository-name")).toHaveText("example/project");
 });
 
-test("measure selection separates commits, GitHub events, contributors, and cumulative balances", async ({
+test("metric selection separates commits, GitHub events, contributors, and cumulative balances", async ({
   page,
 }) => {
   await page.goto("/");
-  await page.getByLabel("Choose manifest JSON").setInputFiles({
-    name: "manifest.json",
+  await page.getByLabel("Choose summary JSON").setInputFiles({
+    name: "summary.json",
     mimeType: "application/json",
     buffer: Buffer.from(combinedSource([fixture(), fixture("2024-03")]).text),
   });
-  const measure = page.getByLabel("Measure", { exact: true });
-  await expect(measure).toHaveValue("github-activities");
+  const metric = page.getByLabel("Metric", { exact: true });
+  await expect(metric).toHaveValue("github-activities");
   await expect(page.getByLabel("Commits", { exact: true })).toBeHidden();
-  await measure.selectOption("commits");
-  await expect(page.locator("#contribution-types")).toBeHidden();
+  await metric.selectOption("commits");
+  await expect(page.locator("#activity-types")).toBeHidden();
   expect((await csvLines(page))[1]).toBe('"2024-02","Collected","2"');
-  await measure.selectOption("contributors");
+  await metric.selectOption("contributors-by-type");
   await expect(page.locator("#chart-note")).toContainText("Side-by-side bars");
   await expect(page.getByLabel("Commits", { exact: true })).toBeVisible();
-  await measure.selectOption("balance");
+  await metric.selectOption("balance");
   await expect(page.getByLabel("Cumulative", { exact: true })).toBeChecked();
   await expect(page.getByLabel("Monthly", { exact: true })).toBeDisabled();
   await expect(page.locator("#classifications")).toBeHidden();
@@ -189,7 +200,7 @@ test("measure selection separates commits, GitHub events, contributors, and cumu
   await expect(
     page.getByRole("button", { name: "Download Data (CSV)" }),
   ).toBeDisabled();
-  await measure.selectOption("total-contributors");
+  await metric.selectOption("total-contributors");
   await expect(page.locator("#chart-title")).toHaveText(
     "Cumulative contributors",
   );
@@ -203,12 +214,12 @@ test("downloads the current chart as a PNG with its repository and range in the 
   page,
 }) => {
   await page.goto("/");
-  await page.getByLabel("Choose manifest JSON").setInputFiles({
-    name: "manifest.json",
+  await page.getByLabel("Choose summary JSON").setInputFiles({
+    name: "summary.json",
     mimeType: "application/json",
     buffer: Buffer.from(combinedSource([fixture(), fixture("2024-03")]).text),
   });
-  await page.getByLabel("Measure", { exact: true }).selectOption("commits");
+  await page.getByLabel("Metric", { exact: true }).selectOption("commits");
   const downloadReady = page.waitForEvent("download");
   await page.getByRole("button", { name: "Download PNG" }).click();
   const download = await downloadReady;
@@ -227,22 +238,24 @@ test("GitHub activity actor filters update chart downloads with bots excluded by
   page,
 }) => {
   await page.goto("/");
-  await page.getByLabel("Choose manifest JSON").setInputFiles({
-    name: "manifest.json",
+  await page.getByLabel("Choose summary JSON").setInputFiles({
+    name: "summary.json",
     mimeType: "application/json",
     buffer: Buffer.from(combinedSource([fixture(), fixture("2024-03")]).text),
   });
   await expect(
     page.getByLabel("Known bots", { exact: true }),
   ).not.toBeChecked();
-  await expect(page.getByLabel("Undetermined", { exact: true })).toBeChecked();
+  await expect(
+    page.getByLabel("Unknown actors", { exact: true }),
+  ).toBeChecked();
   await page.getByRole("button", { name: "Clear", exact: true }).click();
-  await page.getByLabel("Inline review comments", { exact: true }).check();
+  await page.getByLabel("PR review comments", { exact: true }).check();
   await page.getByLabel("Issue comments", { exact: true }).check();
   expect((await csvLines(page))[1]).toBe('"2024-02","Collected","1","1"');
   await page.getByLabel("Known bots", { exact: true }).check();
   expect((await csvLines(page))[1]).toBe('"2024-02","Collected","1","2"');
-  await page.getByLabel("Undetermined", { exact: true }).uncheck();
+  await page.getByLabel("Unknown actors", { exact: true }).uncheck();
   await page.getByLabel("Cumulative", { exact: true }).check();
   expect((await csvLines(page)).at(-1)).toBe('"2024-03","Collected","0","4"');
 });

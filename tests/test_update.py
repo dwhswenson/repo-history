@@ -117,7 +117,7 @@ def seed(directory, empty, month="2024-02", repository_id="R_example"):
             month_end=end,
             collection_started_at=NOW,
             collection_finished_at=NOW,
-            ongoing=start <= NOW < end,
+            is_partial=start <= NOW < end,
             repository_node_id=repository_id,
             repository=replace(
                 empty.metadata.repository,
@@ -137,13 +137,13 @@ def test_latest_month_recollected_and_earlier_gaps_untouched(session, tmp_path, 
     latest = seed(tmp_path, empty)
     before = old.read_bytes()
     (tmp_path / "2025-03.json").mkdir()
-    (tmp_path / "manifest.json").write_text("ignored")
+    (tmp_path / "summary.json").write_text("ignored")
     assert run(tmp_path) == 0
     assert old.read_bytes() == before
     assert not (tmp_path / "2024-01.json").exists()
     assert api.report_from_json(latest.read_text()).activities
     assert (tmp_path / "2024-04.json").exists()
-    assert (tmp_path / "manifest.json").read_text() == "ignored"
+    assert (tmp_path / "summary.json").read_text() == "ignored"
     payloads = requests(session)
     counts = Counter(
         (p["operationName"], p["variables"].get("id"), p["variables"].get("after"))
@@ -169,7 +169,7 @@ def test_no_reports_falls_back_to_history(session, tmp_path, destination):
     if destination != "missing":
         directory.mkdir()
     if destination == "unrelated":
-        (directory / "manifest.json").write_text("ignored")
+        (directory / "summary.json").write_text("ignored")
         (directory / "2025-01.json").mkdir()
     assert run(directory, "--end", "2024-02") == 0
     assert (directory / "2023-12.json").exists()  # imported commit before creation
@@ -337,7 +337,7 @@ def test_bounded_range_collects_once_and_groups_months(tmp_path, monkeypatch, en
     )
     for month, expected in (
         (2, {"pr_opened", "commit"}),
-        (3, {"pr_conversation_comment"}),
+        (3, {"pr_discussion_comment"}),
     ):
         grouped = api.report_from_json(
             (tmp_path / f"2024-{month:02d}.json").read_text()
@@ -432,7 +432,7 @@ def test_embedded_update_request_budget(session, tmp_path, paginated):
     )
     assert set(optimized.summaries.repository_counts) == set(api.ACTIVITY_TYPES)
     assert optimized.summaries.repository_counts["pr_review"] == 1
-    assert optimized.summaries.repository_counts["pr_inline_review_comment"] == 2
+    assert optimized.summaries.repository_counts["pr_review_comment"] == 2
 
 
 def test_update_all_activity_overflows_and_later_thread_comments(session, tmp_path):

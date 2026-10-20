@@ -1,11 +1,11 @@
-"""Non-overlapping backfill phase durations and an enclosing runtime summary."""
+"""Non-overlapping collection phase durations and an enclosing runtime summary."""
 
 from contextlib import contextmanager
 from contextvars import ContextVar
 from time import perf_counter
 
 _PHASES: ContextVar[list[float] | None] = ContextVar(
-    "backfill_phase_times", default=None
+    "collect_phase_times", default=None
 )
 
 
@@ -34,7 +34,7 @@ def timed_phase(logger, name):
 
 
 @contextmanager
-def backfill_timing(logger, *, started=None):
+def collect_timing(logger, *, started=None):
     # The CLI owns the outer scope so its setup and display cleanup are included.
     if _PHASES.get() is not None:
         yield
@@ -51,7 +51,7 @@ def backfill_timing(logger, *, started=None):
         elapsed = perf_counter() - started
         measured = sum(phases)
         logger.info(
-            "Backfill summary status=%s total_elapsed_seconds=%.3f "
+            "Collect summary status=%s total_elapsed_seconds=%.3f "
             "phase_elapsed_seconds=%.3f unaccounted_seconds=%.3f",
             "completed" if completed else "failed",
             elapsed,
