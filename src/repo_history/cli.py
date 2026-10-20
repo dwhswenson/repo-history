@@ -11,7 +11,7 @@ from time import perf_counter
 from ._timing import backfill_timing
 from .backfill import _run_backfill, _validate_optional_range, _validate_request
 from .errors import GitHubAPIError, RateLimitError
-from .manifest import _chop_partial_manifest, write_manifest
+from .manifest import _chop_partial_manifest, _combine_manifests, write_manifest
 from .update import _prepare_update, _run_update
 
 LOG = logging.getLogger(__name__)
@@ -113,6 +113,27 @@ def _parser() -> argparse.ArgumentParser:
         help="output manifest path; default: edit in place",
     )
     _verbosity(chop)
+    combine = commands.add_parser(
+        "combine-manifests",
+        help="Combine manifests from disjoint repositories offline.",
+        description="Combine at least two manifest files or directories containing "
+        "manifest.json. Repositories must not overlap and retained months must "
+        "have complete coverage. Exclude an entire month if any source is ongoing "
+        "unless --include-partial is supplied.",
+    )
+    combine.add_argument(
+        "manifests",
+        nargs="+",
+        type=Path,
+        metavar="MANIFEST",
+        help="at least two manifest files or directories containing manifest.json",
+    )
+    combine.add_argument("--output", "-o", required=True, type=Path)
+    combine.add_argument("--display-name", required=True, help="nonblank dataset title")
+    combine.add_argument(
+        "--include-partial", action="store_true", help="retain ongoing months"
+    )
+    _verbosity(combine)
     return parser
 
 
@@ -120,6 +141,11 @@ def main(argv: list[str] | None = None) -> int:
     timer = perf_counter()
     parser = _parser()
     args = parser.parse_args(argv)
+    if args.command == "combine-manifests":
+        if len(args.manifests) < 2:
+            parser.error("combine-manifests requires at least two input manifests")
+        if not args.display_name.strip():
+            parser.error("--display-name must not be blank")
     now = _utc_now()
     if args.command in {"backfill", "update"}:
         try:
@@ -177,6 +203,14 @@ def main(argv: list[str] | None = None) -> int:
             path = _chop_partial_manifest(args.manifest, output_path=args.output)
             if path is not None:
                 saved(path)
+        elif args.command == "combine-manifests":
+            path = _combine_manifests(
+                args.manifests,
+                output_path=args.output,
+                display_name=args.display_name,
+                include_partial=args.include_partial,
+            )
+            saved(path)
         elif args.command == "backfill":
             with (
                 backfill_timing(LOG, started=timer),

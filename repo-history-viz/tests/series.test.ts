@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { eventAggregate } from "./event-reference";
 import { aggregate, type ViewState } from "../src/series";
-import { ACTIVITY_TYPES } from "../src/report";
+import { ACTIVITY_TYPES, parseManifest } from "../src/report";
+import combined from "../../tests/fixtures/combined-manifest-v1.json" with { type: "json" };
 import {
   fixture,
   source,
@@ -21,6 +22,98 @@ const defaults: ViewState = {
 const reports = loadReports([source(), source("2024-03")]);
 const plot = (overrides: Partial<ViewState> = {}) =>
   aggregate(reports, { ...defaults, ...overrides });
+
+describe("CLI-combined contributor identities across repositories and months", () => {
+  const manifest = parseManifest({
+    name: "combined.json",
+    text: JSON.stringify(combined),
+  });
+  const values = (overrides: Partial<ViewState> = {}) =>
+    aggregate(manifest, {
+      ...defaults,
+      metric: "total-contributors",
+      end: "2024-04",
+      ...overrides,
+    }).series.map((series) => series.values);
+
+  it("unions shared and returning actors and respects the selected range", () => {
+    expect(values()).toEqual([[3, 3, 2]]);
+    expect(values({ mode: "cumulative" })).toEqual([[3, 4, 4]]);
+    expect(values({ mode: "cumulative", start: "2024-04" })).toEqual([[2]]);
+    expect(
+      values({
+        mode: "cumulative",
+        classifications: ["human", "bot", "unresolved_git"],
+      }),
+    ).toEqual([[4, 5, 5]]);
+  });
+
+  it("filters identities and contribution types without summing populations", () => {
+    expect(values({ classifications: ["human"] })).toEqual([[2, 3, 2]]);
+    expect(values({ classifications: ["bot"] })).toEqual([[1, 1, 0]]);
+    expect(values({ classifications: ["unresolved_git"] })).toEqual([
+      [1, 0, 0],
+    ]);
+    expect(values({ classifications: [], mode: "cumulative" })).toEqual([
+      [0, 0, 0],
+    ]);
+    expect(
+      values({
+        metric: "contributors",
+        types: ["commit", "issue_comment"],
+        combined: true,
+      }),
+    ).toEqual([
+      [2, 2, 1],
+      [1, 0, 1],
+      [3, 2, 2],
+    ]);
+    expect(
+      values({
+        metric: "contributors",
+        types: ["commit", "issue_comment"],
+        combined: true,
+        mode: "cumulative",
+      }),
+    ).toEqual([
+      [2, 3, 4],
+      [1, 1, 2],
+      [3, 3, 4],
+    ]);
+  });
+
+  it("sums events independently of co-author credits and filters GitHub activity", () => {
+    expect(values({ metric: "commits" })).toEqual([[2, 2, 1]]);
+    expect(values({ metric: "commits", mode: "cumulative" })).toEqual([
+      [2, 4, 5],
+    ]);
+    expect(
+      values({
+        metric: "github-activities",
+        types: ["issue_opened", "pr_review", "issue_comment"],
+        combined: true,
+      }),
+    ).toEqual([
+      [1, 1, 0],
+      [0, 0, 0],
+      [2, 0, 1],
+      [3, 1, 1],
+    ]);
+    expect(
+      values({
+        metric: "github-activities",
+        types: ["issue_opened", "pr_review", "issue_comment"],
+        combined: true,
+        classifications: ["human", "bot", "unresolved_git"],
+      }),
+    ).toEqual([
+      [1, 1, 0],
+      [1, 1, 0],
+      [2, 0, 1],
+      [4, 2, 1],
+    ]);
+  });
+});
 
 describe("monthly and cumulative aggregation", () => {
   it("separates commits from GitHub activity and keeps commit counting independent of type filters", () => {

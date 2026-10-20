@@ -186,7 +186,11 @@ event counts sum source counts. Coverage messages identify their source reposito
 The contract accepts prepared multi-repository manifests, including ongoing sources.
 Missing sources require known pre-history evidence; all other gaps fail validation
 for multiple repositories. Single-repository manifests retain gap visualization.
-The Python `summarize` command still accepts one repository, with optional
-`--display-name`; manifest combining and its ongoing-month exclusion policy are
-future work. Collection state files contain private-to-the-dataset resume metadata
-and are not part of browser input.
+The Python `summarize` command accepts one repository, with optional `--display-name`.
+Use `repo-history combine-manifests repo-a repo-b/manifest.json -o combined.json --display-name "Project activity"`
+to prepare one dataset from disjoint repository sets. Inputs accept manifest files
+or directories containing `manifest.json`. Retained months require continuous,
+complete source coverage except proven pre-history omissions. The command excludes
+an entire calendar month when any source is ongoing unless `--include-partial` is
+supplied. Collection state files contain private-to-the-dataset resume metadata and
+are not part of browser input.

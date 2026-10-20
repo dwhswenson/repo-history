@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { loadManifest, parseManifest } from "../src/report";
 import { fixture, manifestSource, toManifest } from "./fixtures";
 import generated from "../../tests/fixtures/viz-manifest-v1.json" with { type: "json" };
+import combined from "../../tests/fixtures/combined-manifest-v1.json" with { type: "json" };
 
 describe("summary manifests", () => {
   it("accepts Python-generated manifests and sorts months", () => {
@@ -137,6 +138,11 @@ describe("hosted manifest", () => {
 });
 
 describe("prepared multi-repository manifests", () => {
+  it("accepts the CLI-generated fixture spanning repositories and months", () => {
+    expect(
+      parseManifest({ name: "combined.json", text: JSON.stringify(combined) }),
+    ).toEqual(combined);
+  });
   it("accepts the Python contract fixture with deduplicated populations", async () => {
     const { default: fixture } = await import(
       "../../tests/fixtures/multi-repo-manifest-v1.json",

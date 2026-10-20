@@ -1,6 +1,7 @@
 """Offline, validated summary manifests for the browser visualizer."""
 
 import json
+import logging
 import os
 import tempfile
 from collections.abc import Iterable
@@ -15,6 +16,7 @@ from .writing import MONTHLY_FILE
 
 METADATA_KEYS = ("month", "month_start", "month_end", "ongoing")
 CLASSES = ("human", "bot", "unresolved_git")
+LOG = logging.getLogger(__name__)
 
 
 def _population(keys, actors):
@@ -68,7 +70,7 @@ def _validate_summary(summary, actors, path):
 
 
 def _sum_summaries(summaries, actors):
-    """Expected chart summary for validation, never a manifest-combining API."""
+    """Sum activity counts and union actor keys for combination and validation."""
     counts = dict.fromkeys(ACTIVITY_TYPES, 0)
     unattributed = counts.copy()
     per_actor = {}
@@ -312,6 +314,103 @@ def resolve_manifest_path(path: str | os.PathLike) -> Path:
     """
     path = Path(path)
     return path / "manifest.json" if path.is_dir() else path
+
+
+def _combine_manifests(
+    paths: Iterable[str | os.PathLike],
+    *,
+    output_path: str | os.PathLike,
+    display_name: str,
+    include_partial: bool = False,
+) -> Path:
+    """Combine disjoint repository manifests offline; inputs must remain stable."""
+    paths = [resolve_manifest_path(path) for path in paths]
+    if len(paths) < 2:
+        raise ReportWriteError("combining requires at least two input manifests")
+    if not display_name.strip():
+        raise ReportWriteError("display name must not be blank")
+    target = Path(output_path)
+    if MONTHLY_FILE.fullmatch(target.name):
+        raise ReportWriteError("manifest output must not overwrite a monthly report")
+    if target.is_dir():
+        raise ReportWriteError(f"{target}: output must be a file path")
+
+    inputs = []
+    for path in paths:
+        if target.resolve() == path.resolve() or (
+            target.exists() and target.samefile(path)
+        ):
+            raise ReportWriteError(f"{target}: output must not overwrite input {path}")
+        LOG.debug("Reading and validating manifest %s", path)
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            validate_manifest(data)
+        except ValueError as exc:
+            raise ReportWriteError(f"{path}: invalid manifest: {exc}") from exc
+        inputs.append((path, data))
+
+    repositories, repository_inputs, actors, actor_inputs, by_month = {}, {}, {}, {}, {}
+    for path, data in inputs:
+        for repo in data["repositories"]:
+            key = repo["node_id"]
+            if key in repositories:
+                raise ReportWriteError(
+                    f"repository {repo['full_name']} ({key}) appears in both "
+                    f"{repository_inputs[key]} and {path}"
+                )
+            repositories[key] = repo
+            repository_inputs[key] = path
+        for key, classification in data["actors"].items():
+            if key in actors and actors[key] != classification:
+                raise ReportWriteError(
+                    f"conflicting classifications for actor {key} in "
+                    f"{actor_inputs[key]} and {path}"
+                )
+            actors[key] = classification
+            actor_inputs[key] = path
+        for month in data["months"]:
+            by_month.setdefault(month["metadata"]["month"], []).extend(
+                month["source_reports"]
+            )
+
+    months, used = [], set()
+    for month, sources in sorted(by_month.items()):
+        sources.sort(key=lambda s: s["metadata"]["repository"]["node_id"])
+        ongoing = [s for s in sources if s["metadata"]["ongoing"]]
+        if ongoing and not include_partial:
+            LOG.warning(
+                "Excluding partial month %s (ongoing sources: %s); "
+                "use --include-partial to retain it",
+                month,
+                ", ".join(
+                    f"{s['metadata']['repository']['full_name']} "
+                    f"({s['metadata']['repository']['node_id']})"
+                    for s in ongoing
+                ),
+            )
+            continue
+        metadata = {key: sources[0]["metadata"][key] for key in METADATA_KEYS}
+        metadata["ongoing"] = bool(ongoing)
+        summary = _sum_summaries([s["summaries"] for s in sources], actors)
+        used.update(summary["actor_counts"])
+        months.append(
+            {"metadata": metadata, "summaries": summary, "source_reports": sources}
+        )
+    if not months:
+        raise ReportWriteError(
+            "combining would leave no months after excluding partial months"
+        )
+    result = {
+        "schema_version": "1",
+        "display_name": display_name,
+        "repositories": [repositories[key] for key in sorted(repositories)],
+        "actors": {key: actors[key] for key in sorted(used)},
+        "months": months,
+    }
+    LOG.debug("Validating combined manifest for %s", target)
+    validate_manifest(result)
+    _publish_manifest(result, target)
+    return target
 
 
 def _chop_partial_manifest(

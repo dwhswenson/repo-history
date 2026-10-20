@@ -679,6 +679,58 @@ resolve a file or directory to a manifest path. It accepts strings and path-like
 objects, preserves relative paths, and leaves existence and content validation
 to the reader. Commands accepting multiple inputs can apply it to each input.
 
+### Combining manifests
+
+Combine at least two manifests into one dataset, offline and without GitHub
+credentials:
+
+```sh
+repo-history combine-manifests reports/repo-a reports/repo-b/manifest.json \
+  --output public/manifest.json --display-name "Project activity"
+```
+
+Each positional input accepts a filename or directory containing `manifest.json`,
+just like `chop-partial`. Inputs may already contain multiple repositories, but
+their repository sets must be disjoint. A repeated repository node ID is an error,
+even across different month ranges, renamed repositories, or identical files.
+Conflicting classifications for a shared actor key are also errors, including
+actors appearing only in excluded months.
+
+Both `--output` (or `-o`) and a nonblank `--display-name` are required. The output
+must be a separate file, cannot alias an input through a symlink or hard link,
+and cannot use a monthly report filename (`YYYY-MM.json`). Parent directories
+are created as needed. An existing separate output is replaced atomically only
+after all inputs and the assembled manifest validate. Inputs, monthly reports,
+and collection-state files are left unchanged. Keep inputs stable while combining.
+
+The candidate range spans the earliest through latest input month. By default,
+an entire calendar month is excluded if any source marks it ongoing, with a
+warning identifying the month and responsible repositories. This uses the stored
+coverage flag, regardless of today's date. Add `--include-partial` to retain those
+months and their source-specific coverage warnings. At least one month must
+remain, and retained months must be contiguous; excluding an internal partial
+month is an error.
+
+Every retained month must have a source for every included repository unless
+the repository's history evidence proves that month predates its history start.
+Unknown boundaries cannot justify implicit zeros. Unequal ranges and missing
+reports fail instead of automatically trimming the range or filling gaps.
+Collected zero-activity months remain present.
+
+Event counts and per-actor counts are summed across sources; distinct contributor
+populations are recomputed from actor-key unions. The viewer unions the same keys
+across months for cumulative contributors. Linked accounts deduplicate by stable
+GitHub node ID; unresolved Git identities remain estimates and are not reconciled
+with linked accounts. Shared commits count once per repository. Source summaries,
+provenance, and coverage metadata are preserved, and actors used only in excluded
+months are pruned. Reordering inputs produces identical output bytes.
+
+On success the command prints the destination path to stdout. Warnings and
+diagnostics go to stderr; `--quiet` suppresses saved paths and warnings while
+retaining errors, and `--verbose` adds diagnostics. There is no progress display.
+Exit codes are 0 for success, 2 for argument errors, and 1 for validation or
+filesystem failures. The resulting manifest loads directly in `repo-history-viz`.
+
 ## Repository collection state
 
 Successful `backfill` and `update` operations also write `collection-state.json`
@@ -715,8 +767,8 @@ No incremental collection or automatic resume is implemented yet.
 
 The visualization contract now supports `display_name`, `repositories`, `actors`,
 and `months`. `summarize --display-name "Project activity"` sets the title; its
-default is the latest `owner/repo` name. Summarize still rejects mixed repositories.
-There is no `combine-manifests` command yet.
+default is the latest `owner/repo` name. Summarize still rejects mixed repositories;
+use `combine-manifests` to combine existing manifests from disjoint repositories.
 
 Each month has calendar `metadata`, chart-facing `summaries`, and `source_reports`.
 Each source retains the revised monthly metadata and its own summaries, including
@@ -730,6 +782,6 @@ Both validators check source/aggregate consistency. Multi-repository months must
 be contiguous, have at most one source per repository, and include every
 repository unless that month precedes its known history start. Unknown boundaries
 cannot justify implicit zeros. Single-repository manifests may retain gaps.
-Ongoing sources remain representable and visible; a future combining command will
-exclude an entire calendar month by default when any source is ongoing, warning
-instead of silently undercounting, with an explicit inclusion override.
+Ongoing sources remain representable and visible. `combine-manifests` excludes an
+entire calendar month by default when any source is ongoing, warning instead of
+silently undercounting; `--include-partial` retains those months explicitly.
