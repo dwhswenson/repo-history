@@ -12,7 +12,7 @@ from .collection import COVERAGE_LIMITATIONS, _collect_parent, _month_bounds, _R
 from .commits import BOUNDED_LIMITATION, collect_commits
 from .discovery import BOUNDED_DISCOVERY_LIMITATION, discover_parents, select_strategy
 from .errors import GraphQLError, ReportWriteError
-from .models import CommitMetadata, MonthlyReport, RepositoryHistory
+from .models import CommitMetadata, MonthlyReport, Provenance, RepositoryHistory
 from .provenance import make_run, report_metadata
 from .reports import build_report
 from .repository import lookup_repository
@@ -59,8 +59,16 @@ def _collect_snapshot(
     started=None,
     start=None,
     end=None,
+    refresh_parents=False,
+    refreshed_parents=None,
+    history_boundary=None,
 ):
-    """Collect one interval (or full history) with actual strategy provenance."""
+    """Collect history with actual strategy provenance.
+
+    With refresh_parents, start/end constrain parent discovery only: normalize
+    complete selected-parent and commit histories for later reconciliation.
+    history_boundary widens to full parent discovery if earlier activity appears.
+    """
     timer = perf_counter()
     client = None
     completed = False
@@ -85,6 +93,9 @@ def _collect_snapshot(
                 )
             discovery = select_strategy(start, "full" if start is None else "bounded")
             records = _Records()
+            activity_start, activity_end = (
+                (None, None) if refresh_parents else (start, end)
+            )
             for issues, parent, operation in discover_parents(
                 client,
                 repository,
@@ -96,12 +107,35 @@ def _collect_snapshot(
                     client,
                     parent,
                     operation,
-                    start,
-                    end,
+                    activity_start,
+                    activity_end,
                     records,
                     issues=issues,
                 )
-            commit_strategy = collect_commits(client, repository, start, end, records)
+                if refreshed_parents is not None:
+                    refreshed_parents.add(parent["id"])
+            commit_strategy = collect_commits(
+                client, repository, activity_start, activity_end, records
+            )
+            if history_boundary is not None and any(
+                a.occurred_at < history_boundary for a in records.activities.values()
+            ):
+                LOG.info("Earlier history discovered; rebuilding all parent history")
+                # Reuse the captured head and complete commit scan. Refresh parents
+                # afresh rather than combining two observations of the same event.
+                previous = records
+                records = _Records()
+                for activity in previous.activities.values():
+                    if activity.type == "commit":
+                        records.add(activity, (), "CommitHistory")
+                records.actors.update(previous.actors)
+                discovery = "full"
+                for issues, parent, operation in discover_parents(
+                    client, repository, None, None, strategy=discovery
+                ):
+                    _collect_parent(
+                        client, parent, operation, None, None, records, issues=issues
+                    )
             limitations = COVERAGE_LIMITATIONS
             if discovery == "bounded":
                 limitations += (BOUNDED_DISCOVERY_LIMITATION,)
@@ -135,8 +169,8 @@ def _collect_snapshot(
                     "collect_history",
                     started,
                     result.collection_finished_at,
-                    since=start,
-                    until=end,
+                    since=activity_start,
+                    until=activity_end,
                     parents=discovery,
                     commits=commit_strategy,
                 ),
@@ -180,7 +214,13 @@ def history_to_months(
 
 
 def _history_to_months(
-    history, start=None, end=None, *, parent_discovery="full", commit_history="full"
+    history,
+    start=None,
+    end=None,
+    *,
+    parent_discovery="full",
+    commit_history="full",
+    previous_reports=None,
 ):
     """Shared projection with explicit collection provenance."""
     # Imported lazily because collect integrates this module's collector.
@@ -198,6 +238,15 @@ def _history_to_months(
                 parents=parent_discovery,
                 commits=commit_history,
             ),
+        )
+    creation_run = None
+    if history.run.mode == "incremental":
+        creation_run = make_run(
+            "update",
+            history.collection_started_at,
+            history.collection_finished_at,
+            parents=parent_discovery,
+            commits=commit_history,
         )
     earliest = min(
         (activity.occurred_at for activity in history.activities),
@@ -238,6 +287,20 @@ def _history_to_months(
             parents=parent_discovery,
             commits=commit_history,
         )
+        if creation_run is not None:
+            previous = (previous_reports or {}).get(metadata.month)
+            metadata = replace(
+                metadata,
+                provenance=Provenance(
+                    previous.metadata.provenance.created_by
+                    if previous
+                    else creation_run,
+                    history.run,
+                    previous.metadata.provenance.last_rebuilt_by
+                    if previous
+                    else creation_run,
+                ),
+            )
         reports.append(
             build_report(
                 metadata,

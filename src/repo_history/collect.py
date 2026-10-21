@@ -65,6 +65,7 @@ def _run_collect(
     on_written: Callable[[Path], None] | None = None,
     now: datetime | None = None,
     command: str = "collect",
+    snapshot=None,
 ) -> list[Path]:
     with collect_timing(LOG):
         with timed_phase(LOG, "Collect preparation"):
@@ -75,8 +76,16 @@ def _run_collect(
             emit("phase", stage="Preparing", detail="Validating destination")
             repository_id = _check_directory(Path(output_directory))
             emit("phase", stage="Preparing", detail="Looking up repository")
-        history = _collect_history(
-            owner, repo, token=token, expected_repository_id=repository_id, started=now
+        history = (
+            snapshot
+            if snapshot is not None
+            else _collect_history(
+                owner,
+                repo,
+                token=token,
+                expected_repository_id=repository_id,
+                started=now,
+            )
         )
         with timed_phase(LOG, "History grouping/writing monthly"):
             timer = perf_counter()

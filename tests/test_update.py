@@ -132,15 +132,15 @@ def seed(directory, empty, month="2024-02", repository_id="R_example"):
     return path
 
 
-def test_latest_month_recollected_and_earlier_gaps_untouched(session, tmp_path, empty):
+def test_unverified_dataset_rebuilt_and_earlier_gaps_filled(session, tmp_path, empty):
     old = seed(tmp_path, empty, "2023-12")
     latest = seed(tmp_path, empty)
     before = old.read_bytes()
     (tmp_path / "2025-03.json").mkdir()
     (tmp_path / "summary.json").write_text("ignored")
     assert run(tmp_path) == 0
-    assert old.read_bytes() == before
-    assert not (tmp_path / "2024-01.json").exists()
+    assert old.read_bytes() != before
+    assert (tmp_path / "2024-01.json").exists()
     assert api.report_from_json(latest.read_text()).activities
     assert (tmp_path / "2024-04.json").exists()
     assert (tmp_path / "summary.json").read_text() == "ignored"
@@ -151,8 +151,8 @@ def test_latest_month_recollected_and_earlier_gaps_untouched(session, tmp_path, 
     )
     assert max(counts.values()) == 1
     commits = next(p for p in payloads if p["operationName"] == "CommitHistory")
-    assert commits["variables"]["since"] == "2024-01-31T00:00:00+00:00"
-    assert commits["variables"]["until"] == "2024-05-02T00:00:00+00:00"
+    assert "since" not in commits["variables"]
+    assert "until" not in commits["variables"]
 
 
 def test_explicit_start_and_end_override_latest(session, tmp_path, empty):
@@ -188,7 +188,7 @@ def test_explicit_start_empty_directory_uses_range(session, tmp_path):
         "2024-02.json",
         "2024-03.json",
     ]
-    assert any("since" in p["variables"] for p in requests(session))
+    assert all("since" not in p["variables"] for p in requests(session))
 
 
 def test_inferred_reversed_range_before_network(session, tmp_path, empty):
@@ -233,7 +233,7 @@ def test_range_matches_full_history_projection(session, tmp_path):
         assert grouped.actors == monthly.actors
         assert grouped.summaries == monthly.summaries
         assert grouped.metadata.provenance.last_updated_by.parent_discovery == "bounded"
-        assert grouped.metadata.provenance.last_updated_by.commit_history == "bounded"
+        assert grouped.metadata.provenance.last_updated_by.commit_history == "full"
 
 
 @pytest.mark.parametrize("failure", ["collection", "projection", "writing"])
@@ -262,7 +262,7 @@ def test_failure_preservation(session, tmp_path, empty, monkeypatch, failure, ca
             return writer(report, directory)
 
         monkeypatch.setattr(update, "_write_report", fail)
-    assert run(tmp_path) == 1
+    assert run(tmp_path, "--start", "2024-02") == 1
     assert not (tmp_path / "2024-03.json").exists()
     if failure == "writing":
         assert old.read_bytes() != before
@@ -345,7 +345,7 @@ def test_bounded_range_collects_once_and_groups_months(tmp_path, monkeypatch, en
         assert {a.type for a in grouped.activities} == expected
         assert grouped.summaries.repository_counts["commit"] == (1 if month == 2 else 0)
         assert grouped.metadata.provenance.last_updated_by.parent_discovery == "bounded"
-        assert grouped.metadata.provenance.last_updated_by.commit_history == "bounded"
+        assert grouped.metadata.provenance.last_updated_by.commit_history == "full"
         assert any("Experimental" in x for x in grouped.metadata.coverage.limitations)
     assert len(result.calls) == 4
     assert not result.responses
@@ -422,7 +422,7 @@ def test_embedded_update_request_budget(session, tmp_path, paginated):
         }
     else:
         assert not nested
-    assert len(optimized_calls) == (11 if paginated else 6)
+    assert len(optimized_calls) == (14 if paginated else 9)
     assert sum("json" not in kw for _, kw in optimized_calls) == 1
     assert (
         sum(

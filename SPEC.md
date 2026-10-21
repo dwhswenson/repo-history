@@ -24,25 +24,29 @@ Omitted start uses the earlier of repository creation and the earliest observed
 activity, including imported commits. Omitted end uses the invocation's UTC month.
 Include empty months.
 
-Update always collects one interval using bounded parent discovery and buffered
-commit history, then groups activities into monthly reports offline. With no
-explicit start, validate destination reports and use the latest direct-child
-`YYYY-MM.json` filename as the inclusive start, recollecting that month. Ignore
-unrelated files and directories; do not repair earlier gaps. No monthly reports
-or a missing directory triggers full-history collection with automatic start.
-Omitted end uses invocation's UTC month; reject future/reversed ranges before
-requests. Verify repository identity before traversal and validate all projected
-reports before replacing files. Record actual discovery/commit strategies and
-coverage limitations, including internal boundary fallbacks. Neither command
-accepts `--mode` or `--discovery`; Python collect also removes these options.
+Unrestricted update verifies the saved report inventory and full-history baseline
+checkpoint. Missing, malformed, null, or mismatched checkpoint state triggers a
+full-history rebuild through the current UTC month. Invalid monthly reports and
+mixed repository identities still fail. With a valid checkpoint, discover parents
+updated since the prior successful run with a one-second local overlap, collect
+their complete histories, and replace their saved activities. Reconcile all saved
+commits against an unfiltered scan from the captured default-branch head. Rewrite
+affected historical reports and refresh the prior final month through the current
+month, including empty months. Preserve unrelated parent history.
+
+Either explicit month flag selects strict inclusive output limits. With end alone,
+infer start from the latest direct-child monthly filename, ignoring unrelated
+files/directories; without reports use full-history collection. Explicit updates
+invalidate the unrestricted checkpoint. Reject future/reversed ranges before
+requests. Neither command accepts strategy flags.
 
 Summarize generates a self-contained history summary offline, with `summary.json`
 as its default filename. Collection does not regenerate it. Use update with equal
 endpoints for one month. The independent `collect_month` API is removed. Report parsing,
 validation, writing, offline grouping, and summary generation remain available.
 
-Update uses bounded parent discovery and buffered commit history for its interval.
-Collect always uses unfiltered commit history and full GraphQL parent discovery.
+Update uses bounded parent discovery; collect uses full GraphQL parent discovery.
+Both commands use unfiltered commit history.
 Both workflows embed first activity pages and independently paginate overflow.
 
 Each month is independently collectable and replaceable. Earlier reports are not required. **Monthly files contain no cumulative counts**; a later visualizer can compute these from stable actor identities, individual events, and per-actor monthly counts.
@@ -97,22 +101,24 @@ Supplement schema validation with checks that actor references resolve, event ID
 
 ## Collection behavior and edge cases
 
-- An update with equal start/end months collects and writes only that month. It may inspect older parent objects to find that month's activity; it must not generate earlier reports or require earlier outputs.
+- An update with equal start/end months writes only that month. It may inspect older parent objects to find that month's activity; it must not generate earlier reports or require earlier outputs.
 - Do not select parent issues or PRs solely by creation month or current state. An old, closed PR can receive a new comment or review; an old issue can close or reopen in the requested month.
 - Collect uses full issue/PR parent traversal. Use repository connections directly, GraphQL variables, and reusable fragments. Independently paginate parents and nested timelines, comments, reviews, review threads, and commit authors. Detect missing or repeated cursors. [Pagination documentation](https://docs.github.com/en/graphql/guides/using-pagination-in-the-graphql-api)
 - Update uses REST repository issues with all states and an overlapping update-time `since`, local `updated_at >= start` / `created_at < end` selection, and GraphQL hydration by repository identity and item number. Preserve all nested activity rules and the report schema. Completeness of REST parent update timestamps, including live discovery with issues disabled, remains unverified. The verification work in PERFORMANCE.md remains outstanding. Excluded parent histories are outside bounded mode's validation scope. Failures never silently switch strategies; January of year 1 selects full traversal before discovery because the overlap would underflow.
-- Enforce exact month boundaries locally after retrieval. Apply API date filters with understood semantics and explicit coverage limitations.
-- Capture the default-branch head before traversing commits. Use that SHA as the history root in both commit-history strategies.
-- Update requests commit history with `since = interval start - 24 hours` and `until = interval end + 24 hours`. Fully paginate the API results, then retain only commits whose committed dates fall in the exact requested interval. This buffer accommodates small timestamp inversions but does not guarantee exhaustive retrieval: the API's lower bound can prune traversal before reaching matching ancestors. Record the strategy and this limitation in report metadata. If buffered bounds fall outside the API's documented supported date range, select full history traversal before querying and record the strategy actually used.
-- Never stop commit pagination merely because an encountered commit or page has an old date. Update uses full history as a fallback for unsupported filter dates; `collect_history` always requests unfiltered history.
+- Separate discovery observation cutoffs from activity occurrence dates and output month limits. Collect complete selected-parent histories; project explicit output limits offline.
+- Capture the default-branch head before traversing commits. Use that SHA as the unfiltered history root in both commands.
+- Every update fully paginates unfiltered commit history and all nested commit connections. Never stop traversal at an old timestamp. Reconcile removed commits as well as additions; default-branch changes and timestamp inversions require no date-based special cases.
+- If observed activity predates the established history boundary, rebuild all parent history before writing, reusing the captured repository and collected commits to establish new full-history boundary evidence.
+- Incremental reports retain creation and last-rebuild provenance. Newly created months receive a separate initial rebuild descriptor plus the incremental update descriptor. Full/bounded strategies and unbounded occurrence-time collection bounds reflect the actual traversal.
+- Advance checkpoint observation times to the successful run's start; retain the baseline and full-parent-scan times. Publish exact report hashes and captured commit head only after all report writes succeed. Partial-write inventory mismatches trigger a rebuild next time.
 - Read authentication from `GH_TOKEN`, falling back to `GITHUB_TOKEN`. Support GitHub.com repositories accessible to the credential.
 - Use request timeouts, bounded retries, rate-limit handling, and smaller pages for oversized queries. HTTP or GraphQL errors that prevent completion of the selected collection strategy fail the run; accepted coverage limitations do not excuse request failures or incomplete pagination.
-- Write to a temporary file, validate, then atomically replace the requested month. Leave other monthly files untouched. Refuse an output directory containing reports for a different repository node ID.
+- Write to a temporary file, validate, then atomically replace the requested month. Leave months outside explicitly selected ranges untouched. Refuse an output directory containing reports for a different repository node ID.
 - History-first collection uses one client and repository lookup, checks destination repository identity before traversal, then collects every accessible parent/nested connection and unfiltered default-head commit history once. Normalize and deduplicate stable activities using the existing attribution and publication rules. Capture repository creation time in the lookup.
 - History-mode parent queries embed first lifecycle/comment pages and PR review/thread pages; threads embed first inline-comment pages. Use independent `pageInfo` and resume cursors for every overflowing connection, including comments on later thread pages. Bound nested fan-out with 20 parents, 20 activity items, and 10 threads per page; use lean continuation queries except for thread pages, which retain embedded comment pages. Metadata-only parent queries and separate first-page collection are removed.
 - `RepositoryHistory` is a frozen in-memory snapshot containing repository identity/creation time, captured head, collection interval, limitations, actors, and activities. Offline grouping uses UTC occurrence months, includes all referenced actors (including contextual authors and committers), and builds validated reports with shared snapshot metadata and both strategies `full`. Future output months are rejected relative to collection start; future source timestamps can remain in the snapshot.
 - Validate the destination once per collect and all selected history-mode reports before replacing any file. Collection/grouping failures leave existing files untouched; writing failures preserve completed months. Keep per-file atomic replacement. Standalone writes retain full destination checks.
-- Log collection duration, request attempts/retries, measured REST/GraphQL cost and unmeasured attempts, plus history grouping/writing time, including failures. Persistent storage, resume, batching, and concurrency remain deferred.
+- Log collection duration, request attempts/retries, measured REST/GraphQL cost and unmeasured attempts, plus history grouping/writing time, including failures. Graph-delta optimization, interruption resume, and concurrency remain deferred.
 - Sort activities by timestamp and stable ID, and actors by identity key. Identical source data produces identical content except collection metadata.
 
 Document these limitations:
@@ -121,12 +127,12 @@ Document these limitations:
 - Renames preserve repository and actor identity through node IDs; historical display names are not reconstructed.
 - Titles and review states reflect collection-time metadata unless supported by a historical event.
 - Force-pushes, rebases, changed default branches, and newly available data may revise a month when it is rerun.
-- Buffered commit collection may miss in-period ancestors hidden behind commits dated before the buffered lower bound. Local clock errors and unusual or rewritten timestamps can exceed the one-day buffer. Counts are suitable for trend reporting, not an exhaustive audit. History-first collection has no date filters and does not carry the bounded-history warning.
+- Bounded parent discovery can miss timestamp-invisible state changes and entirely deleted parents. Published tests support comments/review submissions advancing timestamps, but thread resolution is an exception. Manual full collect provides reconciliation; automatic periodic scans and live mutation experiments remain deferred.
 - Empty repositories have zero commit activity; disabled issues do not prevent PR collection.
 - Preserve null actors and reasons. For inline comments missing publication timestamps, fall back to creation time only when publication is otherwise confirmed, recording the fallback.
 - Collection is not a transactional GitHub snapshot; concurrent changes may appear on a later rerun.
 
-Persistent caching, incremental synchronization, and scheduling are deferred. The visualizer computes cumulative aggregation from independently versioned, offline-generated history summaries; full monthly reports remain the collection contract.
+Persistent caching, graph-based commit deltas, and scheduling are deferred. The visualizer computes cumulative aggregation from independently versioned, offline-generated history summaries; full monthly reports remain the collection contract.
 
 ## PR-sized implementation phases
 
@@ -138,7 +144,7 @@ Persistent caching, incremental synchronization, and scheduling are deferred. Th
 
 4. **Monthly comments and reviews.** Collect conversation comments, submitted reviews, inline comments, and replies. Test nested pagination, old closed parents, draft exclusion, dismissed reviews, publication timestamps, and double-count prevention.
 
-5. **Monthly commit collection.** Collect captured default-branch history with buffered date bounds for updates and unfiltered history for full collection, attributing commits to authors/co-authors. Record the strategy and coverage limitations. Test merge commits, unlinked identities, duplicate authors, exact month filtering, small timestamp inversions within the buffer, documented omissions beyond the buffer, unbounded fallback across non-monotonic dates, unsupported filter dates, and empty repositories.
+5. **Monthly commit collection.** Collect unfiltered captured default-branch history for both update and full collection, attributing commits to authors/co-authors. Record the strategy and coverage limitations. Test merge commits, unlinked identities, duplicate authors, exact output-month filtering, non-monotonic timestamps across pages, late-merged older commits, removed commits, changed default branches, and empty repositories.
 
 6. **Reports and CLI.** Implement monthly summaries, schema validation, atomic writing, explicit collect/update commands, and offline summarization. Test UTC boundaries, leap years, empty months, partial months, isolated monthly runs, reruns that leave other files untouched, and collect failures.
 
@@ -152,8 +158,8 @@ Monthly reports now nest repository creation/history evidence, three bounded
 provenance descriptors, and coverage observation metadata. Visualization summaries
 retain source summaries alongside prepared aggregates and support a display name
 and repository registry. Repository-wide `collection-state.json` binds checkpoints
-to exact monthly report hashes; only fully materialized full-history collection runs
-currently establish resumable checkpoints. See README sections “JSON contract
+to exact monthly report hashes; fully materialized full-history collection runs establish baseline checkpoints,
+and unrestricted updates consume and advance verified checkpoints. See README sections “JSON contract
 version 1”, “Repository collection state”, and “Prepared multi-repository summaries”
-for field semantics. There is no backward compatibility, schema version bump,
-summary-combining command, or incremental updater in this revision.
+for field semantics. This revision retains schema version 1 and the existing public API; it adds
+checkpoint-backed updates without a selectable collection strategy.

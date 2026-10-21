@@ -4,14 +4,14 @@ The repository has two collection workflows, both using the same embedded-page
 activity collectors:
 
 - `collect`: collect full history once, then group selected months offline.
-- `update`: collect the selected interval once with bounded parent discovery and
-  buffered commit history, then group selected months offline.
+- `update`: reconcile a verified saved baseline using bounded parent discovery
+  and a complete, unfiltered commit scan.
 
-Without an explicit start, update recollects the latest monthly report and every
-subsequent month through its end. No reports triggers full-history collection.
-For a single month, use update with equal start and end values. There is no
-independent monthly collector or selectable collection mode. `summarize` builds
-a visualization summary offline and remains a separate step.
+Without month flags, update uses the previous successful checkpoint as the parent
+discovery cutoff and can rewrite older months. An unusable checkpoint triggers a
+full-history rebuild. Explicit start/end options restrict which months are written
+and invalidate the unrestricted checkpoint. Use equal endpoints for a single month.
+`summarize` remains a separate offline step.
 
 ## Full-history collection
 
@@ -19,7 +19,8 @@ Collect uses one client and repository lookup, exhausts accessible issue and PR
 connections and their nested activity histories, and walks commits reachable from
 the captured default-branch head without date filters. It retains the normalized
 snapshot in memory and groups it into monthly reports without more API requests.
-There is no persistent cache or interruption resume.
+The published inventory/checkpoint supports subsequent updates; partially written
+runs are recovered by a full rebuild rather than interruption resume.
 
 Parent queries embed first activity pages. Parent pages contain up to 20 items;
 activity first pages contain up to 20 items; review-thread pages contain up to 10
@@ -37,27 +38,36 @@ repository lookup and no separate activity first-page requests:
 pixi run -e dev python -m pytest tests/test_history.py::test_collect_collects_once_and_groups_offline -q
 ```
 
-## Bounded update
+## Checkpoint-backed update
 
-Update discovers candidate issues and PRs with the REST repository issues
-endpoint, all states, and `since` one second before interval start. It exhausts
-pagination, deduplicates item numbers, and locally retains parents satisfying
-`updated_at >= start` and `created_at < end`. A later update time does not exclude
-an older parent's in-period activity.
+Update verifies the checkpoint against report hashes before trusting a parent
+cutoff. It discovers candidate issues/PRs with REST repository issues, all states,
+and an overlap before the previous successful run's start. The local timestamp
+filter retains the overlap too. REST adds its existing one-second query overlap;
+normal incremental calls therefore request two seconds before the checkpoint and
+locally retain items updated at least one second before it. It exhausts pagination
+and deduplicates item numbers. Explicit ranges use their month start instead.
 
-GraphQL hydration batches contain at most 20 parents and use the same embedded
-activity fragments as collect. Each retained parent's activity connections are
-exhausted, with exact interval filtering applied locally. Commit history is
-queried once from the captured head, with a 24-hour buffer around the interval.
-The collector does not repeat traversal for each output month.
+Hydration batches contain at most 20 parents and use collect's embedded activity
+fragments. Every selected parent's complete supported history is fetched. Commit
+history is fully paginated once from the captured head, including nested author
+and parent connections even for commits outside explicitly selected output months.
+This avoids date-pruning omissions, at a cost proportional to complete commit
+history on every update. There is no graph-delta optimization or local Git cache.
+
+Unrestricted updates replace all saved commits and refreshed parent histories,
+then compare activities and referenced actors to decide which older reports need
+replacement. The previous final month and subsequent months are always refreshed.
+If earlier history requires a new boundary, full parent discovery reuses the same
+repository lookup and commit scan before publishing a rebuilt baseline.
 
 The deterministic February 2024 update fixture contains one issue, one PR, and one
 review thread, plus commit collection and actor resolution:
 
 | Activity pagination | Requests across REST and GraphQL |
 |---|---:|
-| Activity connections fit in first pages | 6 |
-| Independent activity overflow pages | 11 |
+| Activity connections fit in first pages | 9 |
+| Independent activity overflow pages | 14 |
 
 Tests assert these request budgets directly, including one REST discovery request
 and one hydration request. Additional tests cover every activity connection's
@@ -87,11 +97,12 @@ issues, UTC boundaries, and later parent updates. They compare normalized
 activities, actors, and summaries, and check strategy/coverage differences
 separately. Excluded parents are outside bounded collection's validation scope.
 
-Buffered commit history can also miss matching ancestors behind unusually old
-intermediate timestamps. Full-history collection has no API date filter and avoids
-that particular limitation. Internal date-boundary fallbacks are selected before
-traversal and recorded in provenance. Request failures never silently switch
-strategies.
+Both public collection commands now use unfiltered commit history, so neither
+has the former 24-hour date-buffer limitation. Published timestamp experiments
+support ordinary comments and submitted reviews advancing parent timestamps;
+thread resolution is a known exception. Periodic full parent scans are not enabled:
+manual `collect` reconciles timestamp-invisible changes and entirely deleted parents.
+Request failures never silently switch strategies or remove inaccessible history.
 
 ## Remaining live verification
 
@@ -131,5 +142,5 @@ setup, and display cleanup; library calls measure the collection operation itsel
 Interpreter startup and imports before CLI entry are outside the total. The
 overlapping grouping-only timing is DEBUG rather than INFO.
 
-Persistent caching, concurrency, and incremental checkpoint consumption remain
-separate future work.
+Persistent caching, concurrency, graph-based commit deltas, and automatic periodic
+parent reconciliation remain separate future work.

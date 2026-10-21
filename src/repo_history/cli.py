@@ -58,12 +58,12 @@ def _parser() -> argparse.ArgumentParser:
             name,
             help="Collect repository history."
             if collecting
-            else "Refresh recent months.",
+            else "Refresh history and backfill older activity.",
             description=(
                 "Collect history for an inclusive month range; default to all history."
                 if collecting
-                else "Refresh an inclusive range; infer start from the latest report, "
-                "or collect all history if none exist."
+                else "Reconcile saved history; explicit month limits restrict output. "
+                "Rebuild automatically when no verified checkpoint exists."
             ),
         )
         command.add_argument("repository", type=_repository, metavar="OWNER/REPO")
@@ -73,7 +73,7 @@ def _parser() -> argparse.ArgumentParser:
             help=(
                 "default: earliest history"
                 if collecting
-                else "default: latest report month, recollected; all history if none exist"
+                else "restrict output; default with --end: latest report month"
             ),
         )
         command.add_argument(
@@ -149,6 +149,9 @@ def main(argv: list[str] | None = None) -> int:
         if not args.display_name.strip():
             parser.error("--display-name must not be blank")
     now = _utc_now()
+    unrestricted_update = (
+        args.command == "update" and args.start is None and args.end is None
+    )
     if args.command in {"collect", "update"}:
         try:
             if args.command == "collect":
@@ -240,6 +243,7 @@ def main(argv: list[str] | None = None) -> int:
                 on_written=saved,
                 now=now,
                 expected_repository_id=repository_id,
+                unrestricted=unrestricted_update,
             )
         return 0
     except (GitHubAPIError, ValueError, OSError) as exc:

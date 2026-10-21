@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import tempfile
+from copy import deepcopy
 from pathlib import Path
 
 from ._progress import emit
@@ -198,7 +199,7 @@ def _verify_collection_state(data, directory, *, operation=None):
             )
 
 
-def write_collection_state(directory, run, *, history=None):
+def write_collection_state(directory, run, *, history=None, checkpoint=None):
     directory = Path(directory)
     emit("start", stage="Inventory", detail="Building inventory")
     records, inventory = _inventory(
@@ -247,6 +248,18 @@ def write_collection_state(directory, run, *, history=None):
                     "default_branch_head": history.default_branch_head,
                 },
             }
+    if checkpoint is not None and not any(
+        a.occurred_at >= month_bounds(last)[1] for a in history.activities
+    ):
+        data["checkpoint"] = deepcopy(checkpoint)
+        cp = data["checkpoint"]
+        cp["report_end_month"] = last
+        for source in ("issues", "pull_requests", "commits"):
+            cp[source]["checked_through"] = raw_run["started_at"]
+        cp["commits"].update(
+            default_branch=history.default_branch,
+            default_branch_head=history.default_branch_head,
+        )
     path = directory / STATE_FILE
     temporary = None
     try:

@@ -95,7 +95,7 @@ Collect repository history and summarize reports.
 positional arguments:
   {collect,update,summarize,trim-partial,combine}
     collect             Collect repository history.
-    update              Refresh recent months.
+    update              Refresh history and backfill older activity.
     summarize           Generate the history summary offline.
     trim-partial        Remove one trailing partial month from an existing
                         summary offline.
@@ -108,7 +108,7 @@ options:
 The `collect` and `update` commands are the main commands for collecting history, and they produce monthly JSON files named in the format YYYY-MM.json, which contain the collected activity history of a repository.
 To run them, you need to provide a GitHub token with read access to the repository you want to collect history for, and store that in either the `GH_TOKEN` or `GITHUB_TOKEN` environment variable.
 
-Both collection commands will also produce a `collection-state.json` file, which is used to facilitate incremental updates later.
+Both collection commands will also produce a `collection-state.json` file, which binds the saved report inventory to the last successful collection checkpoint.
 
 ### `collect`
 
@@ -150,31 +150,29 @@ usage: repo-history update [-h] [--start YYYY-MM] [--end YYYY-MM]
                            [--quiet | --verbose]
                            OWNER/REPO
 
-Refresh an inclusive range; infer start from the latest report, or collect all
-history if none exist.
+Reconcile saved history; explicit month limits restrict output. Rebuild
+automatically when no verified checkpoint exists.
 
 positional arguments:
   OWNER/REPO
 
 options:
   -h, --help            show this help message and exit
-  --start YYYY-MM       default: latest report month, recollected; all history
-                        if none exist
+  --start YYYY-MM       restrict output; default with --end: latest report month
   --end YYYY-MM         default: current UTC month
   --output-directory OUTPUT_DIRECTORY
   --quiet               errors only; suppress saved paths
   --verbose             include debug diagnostics
 ```
 
-The `update` subcommand is usually run to refresh previously collected monthly reports.
-By default, it recollects the latest saved report month and every month through the current UTC month, replacing the reports in that range.
-If no monthly reports exist, it falls back to full-history collection.
-It does not update the visualization summary; run `summarize` again to regenerate it.
-Its process is:
+The `update` subcommand refreshes previously collected repository history, including older months affected by newly discovered activity.
+The update goes through several stages:
 
-1. Discover issues and PRs updated since the start of the selected range, then collect their supported activity events within that range, including comments and reviews on older items.
-2. Collect commits reachable from the captured default-branch head whose commit dates fall within the selected range.
-3. Group the collected activity into monthly reports and replace the report files for the selected range.
+1. Checking the saved collection state, falling back to full collection if no verified checkpoint exists.
+2. Collecting complete histories for issues and pull requests updated since the last successful collection, and all commits reachable from the default branch.
+3. Reconciling the collected activity with saved history, then rewriting affected monthly reports and saving the new collection state.
+
+Explicit start/end months restrict which reports are written.
 
 ### `summarize`
 

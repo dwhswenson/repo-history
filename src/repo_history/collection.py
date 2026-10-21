@@ -155,23 +155,26 @@ class _Records:
             raise GraphQLError("conflicting lifecycle event ID", operation=operation)
         self.activities[activity.id] = activity
         for actor in actors:
-            if actor is None:
-                continue
-            previous = self.actors.get(actor.key)
-            if previous is not None:
-                if previous.classification != actor.classification:
-                    raise GraphQLError(
-                        "conflicting actor classification", operation=operation
-                    )
-                actor = replace(
-                    previous,
-                    **{
-                        field: getattr(actor, field)
-                        for field in ("database_id", "login", "display_name", "url")
-                        if getattr(actor, field) is not None
-                    },
+            self.add_actor(actor, operation)
+
+    def add_actor(self, actor, operation):
+        if actor is None:
+            return
+        previous = self.actors.get(actor.key)
+        if previous is not None:
+            if previous.classification != actor.classification:
+                raise GraphQLError(
+                    "conflicting actor classification", operation=operation
                 )
-            self.actors[actor.key] = actor
+            actor = replace(
+                previous,
+                **{
+                    field: getattr(actor, field)
+                    for field in ("database_id", "login", "display_name", "url")
+                    if getattr(actor, field) is not None
+                },
+            )
+        self.actors[actor.key] = actor
 
 
 def _collect_parent(client, value, operation, start, end, records, *, issues):
