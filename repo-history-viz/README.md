@@ -4,7 +4,13 @@
 
 ## Use in any static site
 
-Build from this repository with `npm ci && npm run build` inside `repo-history-viz`. Copy **`dist/repo-history-viz.js`** to your site's static assets. This is a single self-contained ES module, with no separate stylesheet or runtime dependencies to host.
+Install the package:
+
+```sh
+npm install @dwhswenson/repo-history-viz
+```
+
+Copy **`node_modules/@dwhswenson/repo-history-viz/dist/repo-history-viz.js`** to your site's static assets, along with `dist/THIRD_PARTY_LICENSES.md` from the package. The JavaScript is a single self-contained ES module, with no separate stylesheet or runtime dependencies to host. Source builds use `npm ci && npm run build` inside `repo-history-viz`.
 
 ```html
 <script type="module" src="/assets/repo-history-viz.js"></script>
@@ -27,14 +33,14 @@ The summary contains a required `display_name`, a `repositories` registry, one s
 
 Regenerate the summary explicitly after adding, replacing, or deleting monthly reports. Collect and update do not regenerate it automatically. Source reports must remain unchanged during generation. The summary is atomically replaced only after every source report and the completed summary validate.
 
-See `examples/embed.html` for a complete host page.
+See the repository’s [embed example](https://github.com/dwhswenson/repo-history/blob/main/repo-history-viz/examples/embed.html) for a complete host page. Examples are source templates and are not included in the npm package.
 
 ## npm and Astro
 
 The npm entry point exports the class and an explicit registration function. The registration entry point registers the standard tag automatically:
 
 ```js
-import "repo-history-viz/register";
+import "@dwhswenson/repo-history-viz/register";
 ```
 
 For Astro, install the package (or a local packed tarball), then use a normal processed client script. No `client:*` directive or framework integration is required:
@@ -45,15 +51,15 @@ const summary = `${import.meta.env.BASE_URL}reports/summary.json`;
 ---
 <repo-history-viz summary={summary} metrics="commits github-activities" hide-loader></repo-history-viz>
 <script>
-  import "repo-history-viz/register";
+  import "@dwhswenson/repo-history-viz/register";
 </script>
 ```
 
-A reusable wrapper is provided in `examples/astro/RepositoryHistory.astro`. The package can be imported during server-side rendering without accessing the DOM; registration is a no-op without `customElements`. The interactive viewer is created only in the browser.
+A reusable [Astro wrapper](https://github.com/dwhswenson/repo-history/blob/main/repo-history-viz/examples/astro/RepositoryHistory.astro) is available in the repository. The package can be imported during server-side rendering without accessing the DOM; registration is a no-op without `customElements`. The interactive viewer is created only in the browser.
 
 ## Hugo
 
-Copy `dist/repo-history-viz.js` to `static/js/repo-history-viz.js`. Put your generated summary in `static/reports/`. Copy `examples/hugo/layouts/shortcodes/repo-history.html` into your site's `layouts/shortcodes/`, then embed it in content:
+Copy the package’s `dist/repo-history-viz.js` and `dist/THIRD_PARTY_LICENSES.md` to `static/js/`. Put your generated summary in `static/reports/`. Copy the repository’s [Hugo shortcode](https://github.com/dwhswenson/repo-history/blob/main/repo-history-viz/examples/hugo/layouts/shortcodes/repo-history.html) into your site's `layouts/shortcodes/`, then embed it in content:
 
 ```go-html-template
 {{< repo-history summary="reports/summary.json" metrics="commits github-activities" >}}
@@ -79,7 +85,7 @@ For explicit registration or programmatic loading:
 import {
   defineRepoHistoryViz,
   type HistorySummarySource,
-} from "repo-history-viz";
+} from "@dwhswenson/repo-history-viz";
 
 defineRepoHistoryViz(); // Idempotent.
 await customElements.whenDefined("repo-history-viz");
@@ -136,9 +142,9 @@ Use **Download PNG** above the chart to save its current plot, axes, and legend 
 
 ## Development, builds, and distribution
 
-Requires Node 22+. From the repository root, use `pixi run -e node22 node-install`
+Development requires Node 22.12+; browser use requires a modern browser with ES modules and Custom Elements. From the repository root, use `pixi run -e node22 node-install`
 then `pixi run -e node22 node-ci` for formatting, unit tests, builds, and an npm
-package preview. Run `pixi run -e node22 node-browser-install` once, then
+isolated tarball verification. Run `pixi run -e node22 node-browser-install` once, then
 `pixi run -e node22 node-test-browser` for Chromium tests. The `node24` and
 `node26` environments run the same tasks on those versions. CI runs all three.
 
@@ -150,21 +156,23 @@ npm run dev           # Standalone demo using the component
 npm test
 npm run test:browser  # Requires Chromium; run npx playwright install chromium once
 npm run format:check
-npm run build         # Library, standalone bundle, and TypeScript declarations
+npm run build         # Library, registration entry, standalone bundle, types, licenses
 npm run build:demo    # Optional standalone website in demo-dist/
 npm run preview      # Preview demo-dist/
-npm pack             # Builds and creates repo-history-viz-0.1.0.tgz
+npm run test:package  # Build, pack, isolated install, SSR/registration/type checks
+npm pack             # Builds and creates dwhswenson-repo-history-viz-0.1.0.tgz
 ```
 
 Build outputs:
 
 - `dist/index.js`: bundled npm ES module, explicit registration API.
-- `dist/repo-history-viz.js`: bundled auto-registering ES module for static hosts or the `/register` export.
+- `dist/register.js`: npm auto-registration entry, sharing the main entry’s component class.
+- `dist/repo-history-viz.js`: self-contained auto-registering ES module for static hosts.
+- `dist/*.js`: any shared chunks required by the npm entries.
+- `dist/THIRD_PARTY_LICENSES.md`: generated notices and license texts for bundled libraries.
 - `dist/types/`: TypeScript declarations, including the custom element's DOM typing.
 
-`npm pack` includes only `dist/`, documentation, examples, and npm metadata. Install the tarball into a consuming project with `npm install /path/to/repo-history-viz-0.1.0.tgz`. Consumers do not need this repository or the Python package. Source builds use the canonical schema from the sibling Python package.
-
-The package is prepared for npm publication but is not published automatically. Before a registry release, confirm the package name/version with the project owner, run the checks above, inspect `npm pack --dry-run`, then publish through the project's release process.
+`npm pack` includes built JavaScript, the public declarations, license notices, README, LICENSE, and package metadata. Source code, tests, examples, demo output, and report data remain in the repository. Runtime libraries are bundled and listed as development dependencies; consumers install no additional dependencies. Install the tarball into a consuming project with `npm install /path/to/dwhswenson-repo-history-viz-0.1.0.tgz`. Consumers do not need this repository or the Python package. Source builds use the canonical schema from the sibling Python package.
 
 Browser tests cover local and hosted summary loading, chart controls, range validation, mobile layout, isolated instances, disconnect/reconnect, changing summaries, events, and the built standalone bundle. Browser tests build the package automatically before exercising packaged assets. Set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to reuse an existing Chromium executable. Browser output is ignored under `test-results/`.
 

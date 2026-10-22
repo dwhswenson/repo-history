@@ -363,3 +363,31 @@ test("prepared multi-repository data uses its display name, repository details, 
   await page.getByRole("button", { name: "Download PNG" }).click();
   expect((await download).suggestedFilename()).toContain("Two-repositories");
 });
+
+test("npm registration and main entry share the built component class", async ({
+  page,
+}) => {
+  await page.route("**/package-consumer.html", (route) =>
+    route.fulfill({
+      contentType: "text/html",
+      body: '<repo-history-viz metrics="commits"></repo-history-viz><script type="module" src="/dist/register.js"></script>',
+    }),
+  );
+  await page.goto("/package-consumer.html");
+  await expect(page.getByLabel("Choose summary JSON")).toBeVisible();
+  expect(
+    await page.evaluate(async () => {
+      const entry = "/dist/index.js";
+      const { RepoHistoryViz } = await import(entry);
+      return (
+        document.querySelector("repo-history-viz") instanceof RepoHistoryViz
+      );
+    }),
+  ).toBe(true);
+  await page.getByLabel("Choose summary JSON").setInputFiles({
+    name: "summary.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(source().text),
+  });
+  await expect(page.locator("#dashboard")).toBeVisible();
+});

@@ -51,7 +51,7 @@ node-test = {cmd = "npm test", cwd = "repo-history-viz"}
 node-format-check = {cmd = "npm run format:check", cwd = "repo-history-viz"}
 node-format = {cmd = "npm run format", cwd = "repo-history-viz"}
 node-build = {cmd = "npm run build", cwd = "repo-history-viz"}
-node-pack-check = {cmd = "npm pack --dry-run --ignore-scripts", cwd = "repo-history-viz", depends-on = ["node-build"]}
+node-pack-check = {cmd = "npm run test:package", cwd = "repo-history-viz"}
 node-browser-install = {cmd = "npx playwright install --with-deps chromium", cwd = "repo-history-viz"}
 node-test-browser = {cmd = "npm run test:browser", cwd = "repo-history-viz"}
 node-ci = {depends-on = ["node-format-check", "node-test", "node-pack-check"]}
