@@ -4,7 +4,7 @@
 
 ## Use in any static site
 
-Install the package:
+Install the published package from [npm](https://www.npmjs.com/package/@dwhswenson/repo-history-viz) in your web project:
 
 ```sh
 npm install @dwhswenson/repo-history-viz
@@ -21,9 +21,10 @@ Copy **`node_modules/@dwhswenson/repo-history-viz/dist/repo-history-viz.js`** to
 ></repo-history-viz>
 ```
 
-Generate a summary from validated monthly reports, then publish only the summary and visualizer bundle:
+Install the Python collector from [PyPI](https://pypi.org/project/repo-history/), generate a summary from validated monthly reports, then publish only the summary and visualizer bundle:
 
 ```sh
+python -m pip install repo-history
 repo-history summarize --input-directory reports
 # Optional destination:
 repo-history summarize --input-directory reports --output public/reports/summary.json
@@ -43,7 +44,7 @@ The npm entry point exports the class and an explicit registration function. The
 import "@dwhswenson/repo-history-viz/register";
 ```
 
-For Astro, install the package (or a local packed tarball), then use a normal processed client script. No `client:*` directive or framework integration is required:
+For Astro, install the package with `npm install @dwhswenson/repo-history-viz`, then use a normal processed client script. No `client:*` directive or framework integration is required:
 
 ```astro
 ---
@@ -160,7 +161,7 @@ npm run build         # Library, registration entry, standalone bundle, types, l
 npm run build:demo    # Optional standalone website in demo-dist/
 npm run preview      # Preview demo-dist/
 npm run test:package  # Build, pack, isolated install, SSR/registration/type checks
-npm pack             # Builds and creates dwhswenson-repo-history-viz-0.1.0.tgz
+npm pack             # Builds and creates a package tarball
 ```
 
 Build outputs:
@@ -172,7 +173,7 @@ Build outputs:
 - `dist/THIRD_PARTY_LICENSES.md`: generated notices and license texts for bundled libraries.
 - `dist/types/`: TypeScript declarations, including the custom element's DOM typing.
 
-`npm pack` includes built JavaScript, the public declarations, license notices, README, LICENSE, and package metadata. Source code, tests, examples, demo output, and report data remain in the repository. Runtime libraries are bundled and listed as development dependencies; consumers install no additional dependencies. Install the tarball into a consuming project with `npm install /path/to/dwhswenson-repo-history-viz-0.1.0.tgz`. Consumers do not need this repository or the Python package. Source builds use the canonical schema from the sibling Python package.
+`npm pack` includes built JavaScript, the public declarations, license notices, README, LICENSE, and package metadata. Source code, tests, examples, demo output, and report data remain in the repository. Runtime libraries are bundled and listed as development dependencies; consumers install no additional dependencies. Consumers install the published package with `npm install @dwhswenson/repo-history-viz`. To try a local build, install its generated tarball with `npm install /path/to/package.tgz`. Consumers do not need this repository or the Python package. Source builds use the canonical schema from the sibling Python package.
 
 Browser tests cover local and hosted summary loading, chart controls, range validation, mobile layout, isolated instances, disconnect/reconnect, changing summaries, events, and the built standalone bundle. Browser tests build the package automatically before exercising packaged assets. Set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to reuse an existing Chromium executable. Browser output is ignored under `test-results/`.
 

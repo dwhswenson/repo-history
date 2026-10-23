@@ -29,9 +29,21 @@ Find various live examples of the visualizer in action at [https://repo-history.
 
 ## Installing
 
-The collection and analysis code is written in Python.
-PyPI release coming soon.
-For local development, we recommend using `pixi`, and the pyproject.toml file in this repo carries the configuration for it.
+Install the Python collector and command line tools from [PyPI](https://pypi.org/project/repo-history/) in your Python environment:
+
+```sh
+python -m pip install repo-history
+```
+
+Install the visualization component from [npm](https://www.npmjs.com/package/@dwhswenson/repo-history-viz) in your web project:
+
+```sh
+npm install @dwhswenson/repo-history-viz
+```
+
+For a static site, copy `node_modules/@dwhswenson/repo-history-viz/dist/repo-history-viz.js` and the package's `dist/THIRD_PARTY_LICENSES.md` into your web assets. See the [visualizer installation guide](repo-history-viz/README.md#use-in-any-static-site) for embedding instructions and framework examples.
+
+For local development, use the Pixi environment described under [Development](#development).
 
 ## Quick start
 
