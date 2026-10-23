@@ -1,0 +1,92 @@
+name: Publish to npm
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-npm
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.event.created && !github.event.deleted
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Check release source and version
+        run: |
+          test "$GITHUB_REPOSITORY" = dwhswenson/repo-history
+          test "$GITHUB_REF_TYPE" = tag
+          export EXPECTED_VERSION="${GITHUB_REF_NAME#v}"
+          test -n "$EXPECTED_VERSION"
+          test "$GITHUB_REF" = "refs/tags/v$EXPECTED_VERSION"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          package = json.loads(Path("repo-history-viz/package.json").read_text())
+          if package["version"] != os.environ["EXPECTED_VERSION"]:
+              raise SystemExit("Tag version does not match package.json")
+          lock = json.loads(Path("repo-history-viz/package-lock.json").read_text())
+          if (
+              lock["version"] != package["version"]
+              or lock["packages"][""]["version"] != package["version"]
+          ):
+              raise SystemExit("package-lock.json versions do not match package.json")
+          PY
+      - uses: prefix-dev/setup-pixi@v0.11.0
+        with:
+          pixi-version: v0.76.2
+          environments: node24
+          locked: true
+          cache: false
+      - name: Install npm dependencies
+        run: pixi run --locked -e node24 node-install
+      - name: Check formatting, tests, build, and package contents
+        run: pixi run --locked -e node24 node-ci
+      - name: Install Chromium and system dependencies
+        run: pixi run --locked -e node24 node-browser-install
+      - name: Run browser tests
+        run: pixi run --locked -e node24 node-test-browser
+      - name: Pack the validated build
+        working-directory: repo-history-viz
+        run: |
+          mkdir -p ../npm-dist
+          pixi run --locked -e node24 npm pack --ignore-scripts --pack-destination ../npm-dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: npm-package
+          path: npm-dist/*.tgz
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/@dwhswenson/repo-history-viz
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: npm-package
+          path: npm-dist
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Install npm with trusted publishing support
+        run: npm install --global npm@11.19.1
+      - name: Publish the validated tarball with trusted publishing
+        run: npm publish npm-dist/*.tgz --ignore-scripts --access public --registry=https://registry.npmjs.org/
