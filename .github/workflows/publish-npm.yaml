@@ -89,4 +89,4 @@ jobs:
       - name: Install npm with trusted publishing support
         run: npm install --global npm@11.19.1
       - name: Publish the validated tarball with trusted publishing
-        run: npm publish npm-dist/*.tgz --ignore-scripts --access public --registry=https://registry.npmjs.org/
+        run: npm publish ./npm-dist/*.tgz --ignore-scripts --access public --registry=https://registry.npmjs.org/
